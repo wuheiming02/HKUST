@@ -168,10 +168,10 @@ lbfgs_optimizer = torch.optim.LBFGS(
 #%% Plot losses
 epochs = np.linspace(1, len(total_loss_list), len(total_loss_list))
 
-fig, ax = plt.subplots(1,1,figsize = (6,3),dpi = 150)
-ax.plot(epochs, total_loss_list, label='Total loss')
-ax.plot(epochs, data_loss_list, label='Data loss')
-ax.plot(epochs, residual_loss_list, label='Residual loss')
+fig, ax = plt.subplots(1,1,figsize = (10,4),dpi = 150)
+ax.plot(epochs, total_loss_list, label='Total loss', zorder=2)
+ax.plot(epochs, data_loss_list, label='Data loss', alpha=0.3, zorder=1)
+ax.plot(epochs, residual_loss_list, label='Residual loss', alpha=0.3, zorder=1)
 ax.set_xlabel('Epoch',fontsize = 16)
 ax.set_ylabel('Loss',fontsize = 16)
 ax.set_yscale('log')
@@ -182,16 +182,80 @@ ax.legend(loc='upper right',fontsize = 12)
 plt.show()
 
 #%% Evolution of lambdas
-
-fig, ax = plt.subplots(1,1,figsize = (6,3),dpi = 150)
+fig, ax = plt.subplots(1,1,figsize = (10,4),dpi = 150)
 ax.plot(epochs, lambda1_list, label='$\\lambda_1$')
 ax.plot(epochs, lambda2_list, label='$\\lambda_2$')
 ax.hlines(1, 1, epochs[-1], linestyles='--', colors='red', label='True $\\lambda_1$')
 ax.hlines(0.01, 1, epochs[-1], linestyles='--', colors='black', label='True $\\lambda_2$')
 ax.set_xlabel('Epoch',fontsize = 16)
-ax.set_ylabel('$\\lambda$',fontsize = 16) 
-ax.set_title('Learning $\\lambda$',fontsize = 20)
+ax.set_ylabel('$\\lambda$',fontsize = 16)
+ax.set_yscale('log')
+ax.set_title('Evolution of $\\lambda_1$ and $\\lambda_2$',fontsize = 20)
 ax.tick_params(labelsize=12, which='both',top=True, right = True, direction='in')
 ax.grid(color='xkcd:dark blue',alpha = 0.2)
-ax.legend(loc='upper right',fontsize = 12)
+ax.legend(loc='right',fontsize = 12)
 plt.show()
+
+#%% Save training progress
+checkpoint = {
+    "model_state_dict": model.state_dict(),
+
+    "lambda1": lambda1.detach(),
+    "lambda2": lambda2.detach(),
+
+    "lbs": lbs.detach(),
+    "ubs": ubs.detach(),
+
+    "lambda1_list": lambda1_list,
+    "lambda2_list": lambda2_list,
+    "data_loss_list": data_loss_list,
+    "residual_loss_list": residual_loss_list,
+    "total_loss_list": total_loss_list,
+}
+
+torch.save(checkpoint, "navier_stokes_pinn_checkpoint.pt")
+
+#%% Load checkpoint
+model = nn.Sequential(
+    nn.Linear(3, 20),
+    nn.Tanh(),
+    nn.Linear(20, 20),
+    nn.Tanh(),
+    nn.Linear(20, 20),
+    nn.Tanh(),
+    nn.Linear(20, 20),
+    nn.Tanh(),
+    nn.Linear(20, 20),
+    nn.Tanh(),
+    nn.Linear(20, 20),
+    nn.Tanh(),
+    nn.Linear(20, 20),
+    nn.Tanh(),
+    nn.Linear(20, 20),
+    nn.Tanh(),
+    nn.Linear(20, 2)
+)
+
+lambda1 = nn.Parameter(torch.tensor([2.0], dtype=torch.float))
+lambda2 = nn.Parameter(torch.tensor([2.0], dtype=torch.float))
+
+checkpoint = torch.load("navier_stokes_pinn_checkpoint.pt")
+
+model.load_state_dict(checkpoint['model_state_dict'])
+
+lambda1 = nn.Parameter(checkpoint['lambda1'].clone())
+lambda2 = nn.Parameter(checkpoint['lambda2'].clone())
+
+lbs = checkpoint["lbs"]
+ubs = checkpoint["ubs"]
+
+lambda1_list = checkpoint["lambda1_list"]
+lambda2_list = checkpoint["lambda2_list"]
+data_loss_list = checkpoint["data_loss_list"]
+residual_loss_list = checkpoint["residual_loss_list"]
+total_loss_list = checkpoint["total_loss_list"]
+
+model.eval()
+
+print('lambda1 =', lambda1.item())
+print('lambda2 =', lambda2.item())
