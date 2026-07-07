@@ -1,4 +1,4 @@
-#%%
+#%% Import modules
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
@@ -7,6 +7,7 @@ from torch.utils.data import TensorDataset
 from torch.utils.data import DataLoader
 from torch.utils.data import random_split
 from tqdm import tqdm
+import copy
 
 #%% Generate datasets and dataloaders
 np.random.seed(42)
@@ -146,7 +147,7 @@ dloader_test_super_res = DataLoader(
     shuffle = True
 )
 
-#%% Define FNO model
+#%% Define FNO model, do not run this
 width = 32
 modes = 12
 n_layers = 4
@@ -166,6 +167,16 @@ local_paths = nn.ModuleList([
     ) for _ in range(n_layers)
 ])
 
+project = nn.Sequential(
+    nn.Linear(width, 128),
+    nn.GELU(),
+    nn.Linear(128, 1)
+)
+
+training_loss_list = []
+validation_loss_list = []
+
+#%% Define loss function
 def global_path(X, weights, modes):
     batch_size = X.shape[0]
     width = X.shape[1]
@@ -178,12 +189,6 @@ def global_path(X, weights, modes):
     X_out = torch.fft.irfft(out_ft, n=s, dim=-1)
 
     return X_out
-
-project = nn.Sequential(
-    nn.Linear(width, 128),
-    nn.GELU(),
-    nn.Linear(128, 1)
-)
 
 def fno_forward(X):
     x = lift(X)
@@ -199,7 +204,6 @@ def fno_forward(X):
 
     return y_pred
 
-#%% Define loss function
 def loss_fcn(y_pred, y_true):
     batch_size = y_true.shape[0]
 
@@ -208,7 +212,7 @@ def loss_fcn(y_pred, y_true):
 
     return torch.mean(diff_norm/true_norm)
 
-#%% Define optimizer
+#%% Define optimizer, do not run this
 parameters_list = (
     list(lift.parameters()) + 
     list(spectral_weights.parameters()) + 
@@ -218,7 +222,7 @@ parameters_list = (
 
 adam_optimizer = torch.optim.Adam(parameters_list, lr=1e-3)
 
-#%% Define training cycle
+#%% Define training cycle, do not run this
 def train_epoch(optimizer, loss_fcn, epoch):
     tot_loss = 0
     valid_loss = 0
@@ -226,7 +230,7 @@ def train_epoch(optimizer, loss_fcn, epoch):
     lift.train()
     local_paths.train()
     project.train()
-    for X_train, y_train in tqdm(dloader_train, desc=f"Epoch {epoch+1} (training)", leave=False):
+    for X_train, y_train in tqdm(dloader_train, desc=f"Epoch {epoch+1+start_epoch} (training)", leave=False):
         y_pred = fno_forward(X_train)
         optimizer.zero_grad()
         loss = loss_fcn(y_pred, y_train)
@@ -238,28 +242,40 @@ def train_epoch(optimizer, loss_fcn, epoch):
     local_paths.eval()
     project.eval()
     with torch.no_grad():
-        for X_valid, y_valid in tqdm(dloader_validate, desc=f"Epoch {epoch+1} (validation)", leave=False):
+        for X_valid, y_valid in tqdm(dloader_validate, desc=f"Epoch {epoch+1+start_epoch} (validation)", leave=False):
             y_pred_v = fno_forward(X_valid)
             vloss = loss_fcn(y_pred_v, y_valid)
             valid_loss = valid_loss + vloss.item()
 
     return tot_loss/len(dloader_train), valid_loss/len(dloader_validate)
 
-#%% Training cycle
-n_epochs = 300
+#%% Training cycle, do not run this
+start_epoch = len(validation_loss_list)
+n_epochs = 500
+patience = 100
 
-training_loss_list = []
-validation_loss_list = []
-
-for epoch in range(n_epochs):
+best_epoch = start_epoch
+for epoch in range(start_epoch, start_epoch+n_epochs):
     training_loss, valid_loss = train_epoch(adam_optimizer, loss_fcn, epoch)
     training_loss_list.append(training_loss)
     validation_loss_list.append(valid_loss)
 
-    if epoch % 50 == 0:
-        print(f'epoch:', epoch)
+    if valid_loss < validation_loss_list[best_epoch]:
+        best_epoch = epoch
+        best_lift = copy.deepcopy(lift)
+        best_lift_state_dict = copy.deepcopy(lift.state_dict())
+        best_local_paths = copy.deepcopy(local_paths)
+        best_local_paths_state_dict = copy.deepcopy(local_paths.state_dict())
+        best_project = copy.deepcopy(project)
+        best_project_state_dict = copy.deepcopy(project.state_dict())
+        best_spectral_weights = copy.deepcopy(spectral_weights)
+        best_spectral_weights_list = [w.detach().clone() for w in spectral_weights]
+    elif best_epoch <= epoch - patience:
+        print('Training finished early. {} epochs'.format(epoch+1))
+        print('Best epoch: {}'.format(best_epoch+1))
+        break
 
-print("Training finished")
+print('Training finished. Best epoch: {}'.format(best_epoch+1))
 
 #%% Plot losses
 fig, ax = plt.subplots(1,1,figsize = (8,6),dpi = 150)
@@ -274,13 +290,74 @@ ax.grid(color='xkcd:dark blue',alpha = 0.2)
 ax.legend(loc='upper right',fontsize = 12)
 plt.show()
 
+#%% Test FNO
+def test_model(dloader_test):
+    X_test, u0_test = [], []
+    y_test, y_pred = [], []
+    lift.eval()
+    local_paths.eval()
+    project.eval()
+    test_loss = 0
+    with torch.no_grad():
+        for X_batch, y_batch in tqdm(dloader_test, desc='Testing', leave=False):
+            outcome = fno_forward(X_batch)
+            test_loss = test_loss + loss_fcn(outcome, y_batch).item()
+
+            X_test.append(X_batch[:, :, 1:2])
+            u0_test.append(X_batch[:, :, 0:1] * X_train_std + X_train_mean)
+            y_test.append(y_batch * y_train_std + y_train_mean)
+            y_pred.append(outcome * y_train_std + y_train_mean)
+
+    X_test = torch.concat(X_test).flatten().detach().numpy()
+    u0_test = torch.concat(u0_test).flatten().detach().numpy()
+    y_test = torch.concat(y_test).flatten().detach().numpy()
+    y_pred = torch.concat(y_pred).flatten().detach().numpy()
+
+    return X_test, u0_test, y_test, y_pred, test_loss/len(dloader_test)
+
+#%% Test plots
+lift = best_lift
+local_paths = best_local_paths
+project = best_project
+spectral_weights = best_spectral_weights
+
+X_test_64, u0_test_64, y_test_64, y_pred_64, test_loss_64 = test_model(dloader_test)
+print('L2 Relative error: {:.5f}'.format(test_loss_64))
+
+fig, ax = plt.subplots(1, 1, figsize=(10, 4), dpi=150)
+ax.plot(X_test_64, u0_test_64, '.', label='$u_0(x)$', alpha=0.3)
+ax.plot(X_test_64, y_test_64, '.', label='Exact $u(x,T)$', alpha=0.3)
+ax.plot(X_test_64, y_pred_64, '.', label='FNO prediction', alpha=0.3)
+ax.set_xlabel('$X$', fontsize=16)
+ax.set_ylabel('$u$', fontsize=16)
+ax.set_title('FNO prediction on 64-point grid', fontsize=20)
+ax.tick_params(labelsize=12, which='both', top=True, right=True, direction="in")
+ax.grid(color='xkcd:dark blue', alpha=0.2)
+ax.legend(fontsize=12)
+plt.show()
+
+X_test_super_res, u0_test_super_res, y_test_super_res, y_pred_super_res, test_loss_super_res = test_model(dloader_test_super_res)
+print('L2 Relative error: {:.5f}'.format(test_loss_super_res))
+
+fig, ax = plt.subplots(1, 1, figsize=(10, 4), dpi=150)
+ax.plot(X_test_super_res, u0_test_super_res, '.', label='$u_0(x)$', alpha=0.3)
+ax.plot(X_test_super_res, y_test_super_res, '.', label='Exact $u(x,T)$', alpha=0.3)
+ax.plot(X_test_super_res, y_pred_super_res, '.', label='FNO prediction', alpha=0.3)
+ax.set_xlabel('$X$', fontsize=16)
+ax.set_ylabel('$u$', fontsize=16)
+ax.set_title('FNO prediction on 256-point grid', fontsize=20)
+ax.tick_params(labelsize=12, which='both', top=True, right=True, direction="in")
+ax.grid(color='xkcd:dark blue', alpha=0.2)
+ax.legend(fontsize=12)
+plt.show()
+
 #%% Save training progress
 checkpoint = {
-    "lift_state_dict": lift.state_dict(),
-    "local_paths_state_dict": local_paths.state_dict(),
-    "project_state_dict": project.state_dict(),
+    "lift_state_dict": best_lift_state_dict,
+    "local_paths_state_dict": best_local_paths_state_dict,
+    "project_state_dict": best_project_state_dict,
 
-    "spectral_weights": [w.detach() for w in spectral_weights],
+    "spectral_weights": best_spectral_weights_list,
 
     "alpha": alpha,
     "T_final": T_final,
@@ -293,11 +370,12 @@ checkpoint = {
     "y_train_mean": y_train_mean.detach(),
     "y_train_std": y_train_std.detach(),
 
-    "training_loss_list": training_loss_list,
-    "validation_loss_list": validation_loss_list
+    "training_loss_list": training_loss_list[:best_epoch+1],
+    "validation_loss_list": validation_loss_list[:best_epoch+1]
 }
 
 torch.save(checkpoint, "fno_heat_equation_checkpoint.pt")
+print('Saved checkpoint')
 
 #%% Load checkpoint
 
@@ -309,6 +387,7 @@ n_layers = checkpoint["n_layers"]
 
 lift = nn.Linear(2, width)
 
+scale = 1 / (width * width)
 spectral_weights = nn.ParameterList([
     nn.Parameter(scale * torch.randn((width, width, modes), dtype=torch.cfloat)) for _ in range(n_layers)
 ])
@@ -331,8 +410,14 @@ lift.load_state_dict(checkpoint["lift_state_dict"])
 local_paths.load_state_dict(checkpoint["local_paths_state_dict"])
 project.load_state_dict(checkpoint["project_state_dict"])
 
+best_lift = lift
+best_local_paths = local_paths
+best_project = project
+
 for i in range(n_layers):
     spectral_weights[i].data = checkpoint["spectral_weights"][i]
+
+best_spectral_weights = spectral_weights
 
 X_train_mean = checkpoint["X_train_mean"]
 X_train_std = checkpoint["X_train_std"]
@@ -342,4 +427,7 @@ y_train_std = checkpoint["y_train_std"]
 training_loss_list = checkpoint["training_loss_list"]
 validation_loss_list = checkpoint["validation_loss_list"]
 
-print("Checkpoint loaded")
+print('Checkpoint loaded')
+print('Start epoch {}'.format(len(training_loss_list)))
+
+#%%
