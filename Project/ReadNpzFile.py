@@ -35,3 +35,5 @@ ax.tick_params(axis='x', labelsize=10)
 ax.tick_params(axis='y', labelsize=10)
 fig.tight_layout()
 plt.show()
+
+# %%

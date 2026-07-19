@@ -1,6 +1,8 @@
 #%% Import modules
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MultipleLocator
+import matplotlib.colors as colors
 import torch
 import torch.nn as nn
 from tqdm.auto import tqdm
@@ -9,12 +11,35 @@ from tqdm.auto import tqdm
 np.random.seed(42)
 torch.manual_seed(42)
 
-R_max = 30
-puncture_separation = 6
-
 masses = torch.tensor([0.5, 0.5], dtype=torch.float)
 positions = torch.tensor([[3, 0, 0], [-3, 0, 0]], dtype=torch.float)
 momenta = torch.tensor([[0, 0.2, 0], [0, -0.2, 0]], dtype=torch.float)
+
+npz_3D = np.load('TwoPunctures_5_3D.npz')
+coords = npz_3D['coords']
+u = npz_3D['u']
+X_test_idx = np.random.choice(np.shape(coords)[0], 10000, replace=False)
+X_test = coords[X_test_idx, :]
+y_test = u[X_test_idx]
+X_test = torch.tensor(X_test, dtype=torch.float)
+
+npz_2D = np.load('TwoPunctures_5_2D.npz')
+coords_2D = npz_2D['coords']
+u_2D = npz_2D['u']
+coords_2D_idx = np.where(coords_2D[:, 2]==0)[0]
+coords_2D = coords_2D[coords_2D_idx, :]
+u_2D = u_2D[coords_2D_idx]
+coords_2D = torch.tensor(coords_2D, dtype=torch.float)
+u_2D = torch.tensor(u_2D, dtype=torch.float)
+
+npz_1D = np.load('TwoPunctures_5_1D.npz')
+coords_1D = npz_1D['coords']
+u_1D = npz_1D['u']
+coords_1D_idx = np.where((coords_1D[:, 1]==0) & (coords_1D[:, 2]==0))[0]
+coords_1D = coords_1D[coords_1D_idx, :]
+u_1D = u_1D[coords_1D_idx]
+coords_1D = torch.tensor(coords_1D, dtype=torch.float)
+u_1D = torch.tensor(u_1D, dtype=torch.float)
 
 #%% Physics
 def KBar(X):
@@ -228,20 +253,21 @@ def RawLoss(u_theta_int, u_theta_bound, X_int, X_bound):
 
 def ScaledTotalLoss(L2, Linf, LBC):
     global ema_L2, ema_Linf, ema_LBC
+    alpha = 0.95
 
     with torch.no_grad():
         if ema_L2 is None:
             ema_L2 = L2.detach()
-            ema_Linf = Linf.detach() + 1e-12
+            ema_Linf = Linf.detach()
             ema_LBC = LBC.detach()
         else:
-            ema_L2 = 0.99 * ema_L2 + (1 - 0.99) * L2.detach()
-            ema_Linf = 0.99 * ema_Linf + (1 - 0.99) * Linf.detach()
-            ema_LBC = 0.99 * ema_LBC + (1 - 0.99) * LBC.detach()
+            ema_L2 = alpha * ema_L2 + (1 - alpha) * L2.detach()
+            ema_Linf = alpha * ema_Linf + (1 - alpha) * Linf.detach()
+            ema_LBC = alpha * ema_LBC + (1 - alpha) * LBC.detach()
 
-    L2_tilde = L2 / (ema_L2 + 1e-12)
-    Linf_tilde = Linf / (ema_Linf + 1e-12)
-    LBC_tilde = LBC / (ema_LBC + 1e-12)
+    L2_tilde = L2 / (ema_L2)
+    Linf_tilde = Linf / (ema_Linf)
+    LBC_tilde = LBC / (ema_LBC)
 
     return w2 * L2_tilde + w_inf * Linf_tilde + w_rob * LBC_tilde
 
@@ -289,11 +315,12 @@ L2_list = []
 Linf_list = []
 LBC_list = []
 total_loss_list = []
+L2RE_list = []
 
 start_epoch = 1
 
 #%% Training code
-n_epoch = 200
+n_epoch = 5000
 
 for epoch in tqdm(range(start_epoch, start_epoch+n_epoch)):
     model.train()
@@ -311,6 +338,15 @@ for epoch in tqdm(range(start_epoch, start_epoch+n_epoch)):
 
     total_loss = ScaledTotalLoss(L2, Linf, LBC)
     total_loss_list.append(total_loss.detach())
+
+    model.eval()
+    with torch.no_grad():
+        h_theta_test = model(X_test)
+        u_theta_test = Ansatz(h_theta_test, X_test, kappa)
+
+        u_theta_test = u_theta_test.detach().numpy().flatten()
+        L2RE = np.sqrt(((u_theta_test - y_test)**2).sum() / (y_test**2).sum())
+        L2RE_list.append(L2RE)
 
     optimizer.zero_grad()
     total_loss.backward()
@@ -332,10 +368,13 @@ ax1.grid(color='xkcd:dark blue',alpha = 0.2)
 ax1.legend(loc='upper right',fontsize = 12)
 plt.show()
 
+total_loss = np.array(L2_list) + np.array(Linf_list) + np.array(LBC_list)
+
 fig2, ax2 = plt.subplots(1,1,figsize = (10,4),dpi = 150)
-ax2.plot(epochs, L2_list, label='L2', zorder=2)
-ax2.plot(epochs, Linf_list, label='L_inf', zorder=2)
-ax2.plot(epochs, LBC_list, label='LBC', zorder=2)
+ax2.plot(epochs, L2_list, label='L2', zorder=1)
+ax2.plot(epochs, Linf_list, label='L_inf', zorder=1)
+ax2.plot(epochs, LBC_list, label='LBC', zorder=1)
+# ax2.plot(epochs, total_loss, label='Total loss', zorder=2)
 ax2.set_xlabel('Epoch',fontsize = 16)
 ax2.set_ylabel('Loss',fontsize = 16)
 ax2.set_yscale('log')
@@ -344,6 +383,98 @@ ax2.tick_params(labelsize=12, which='both',top=True, right = True, direction='in
 ax2.grid(color='xkcd:dark blue',alpha = 0.2)
 ax2.legend(loc='right',fontsize = 12)
 plt.show()
+
+fig3, ax3 = plt.subplots(1,1,figsize = (10,4),dpi = 150)
+ax3.plot(epochs, L2RE_list, label='L2RE', zorder=2)
+ax3.set_xlabel('Epoch',fontsize = 16)
+ax3.set_ylabel('Loss',fontsize = 16)
+# ax3.set_yscale('log')
+ax3.set_title('Loss during training',fontsize = 20)
+ax3.tick_params(labelsize=12, which='both',top=True, right = True, direction='in')
+ax3.grid(color='xkcd:dark blue',alpha = 0.2)
+ax3.legend(loc='upper right',fontsize = 12)
+plt.show()
+
+#%% Plot 2D comparison
+fig4, ax4 = plt.subplots(1,1,figsize = (8,6),dpi = 150)
+heatmap4 = ax4.scatter(coords_2D[:, 0],  coords_2D[:, 1], c=u_2D, cmap='plasma')
+ax4.set_aspect('equal', adjustable='box')
+cbar4 = fig4.colorbar(heatmap4)
+cbar4.set_label('$u_{TP}$', fontsize =16, rotation=0)
+cbar4.ax.tick_params(labelsize=12)
+ax4.set_xlabel('X', fontsize = 16)
+ax4.set_ylabel('Y', fontsize = 16)
+ax4.set_xlim(-31, 31)
+ax4.set_ylim(-31, 31)
+ax4.set_title('$u_{TP}$ in XY-plane',fontsize = 20)
+ax4.tick_params(labelsize=12, which='both',top=True, right = True, direction='out')
+fig4.tight_layout()
+plt.show()
+
+model.eval()
+with torch.no_grad():
+    h_theta_2D = model(coords_2D)
+    u_theta_2D = Ansatz(h_theta_2D, coords_2D, kappa)
+
+u_theta_2D = u_theta_2D.detach().flatten()
+
+fig5, ax5 = plt.subplots(1,1,figsize = (8,6),dpi = 150)
+heatmap5 = ax5.scatter(coords_2D[:, 0],  coords_2D[:, 1], c=u_theta_2D, cmap='plasma')
+ax5.set_aspect('equal', adjustable='box')
+cbar5 = fig5.colorbar(heatmap5)
+cbar5.set_label('$u_{\\theta}$', fontsize =16, rotation=0)
+cbar5.ax.tick_params(labelsize=12)
+ax5.set_xlabel('X', fontsize = 16)
+ax5.set_ylabel('Y', fontsize = 16)
+ax5.set_xlim(-31, 31)
+ax5.set_ylim(-31, 31)
+ax5.set_title('Predicted $u_{\\theta}$ in XY-plane',fontsize = 20)
+ax5.tick_params(labelsize=12, which='both',top=True, right = True, direction='out')
+fig5.tight_layout()
+plt.show()
+
+norm6 = colors.TwoSlopeNorm(vmin=-(abs(u_theta_2D-u_2D).max()), vcenter=0.0, vmax=abs(u_theta_2D-u_2D).max())
+fig6, ax6 = plt.subplots(1,1,figsize = (8,6),dpi = 160)
+heatmap6 = ax6.scatter(coords_2D[:, 0],  coords_2D[:, 1], c=u_theta_2D-u_2D, norm=norm6, cmap='RdBu')
+ax6.set_aspect('equal', adjustable='box')
+cbar6 = fig6.colorbar(heatmap6)
+cbar6.ax.tick_params(labelsize=12)
+ax6.set_xlabel('X', fontsize = 16)
+ax6.set_ylabel('Y', fontsize = 16)
+ax6.set_xlim(-31, 31)
+ax6.set_ylim(-31, 31)
+ax6.set_title('$u_{\\theta} - u_{TP}$',fontsize = 20)
+ax6.tick_params(labelsize=12, which='both',top=True, right = True, direction='out')
+fig6.tight_layout()
+plt.show()
+
+#%% Plot 1D comparison
+model.eval()
+with torch.no_grad():
+    h_theta_1D = model(coords_1D)
+    u_theta_1D = Ansatz(h_theta_1D, coords_1D, kappa)
+
+u_theta_1D = u_theta_1D.detach().flatten()
+
+fig7, ax7 = plt.subplots(1, 1, figsize=(6, 4), dpi=300)
+ax7.grid(alpha=0.3)
+ax7.plot(coords_1D[:, 0], u_1D, '-', label='$u_{TP}$')
+ax7.plot(coords_1D[:, 0], u_theta_1D, '--', label='$u_{\\theta}$')
+ax7.set_xlabel('X', fontsize=12)
+ax7.set_ylabel('u', fontsize=12)
+ax7.set_xlim(-30, 30)
+ax7.set_ylim(0)
+ax7.set_title('Gravitational Correction to $\\Psi$ from TwoPunctures', fontsize=16)
+ax7.legend(loc='upper right', fontsize=10)
+ax7.xaxis.set_major_locator(MultipleLocator(10))
+ax7.xaxis.set_minor_locator(MultipleLocator(2))
+ax7.yaxis.set_major_locator(MultipleLocator(0.002))
+ax7.yaxis.set_minor_locator(MultipleLocator(0.0005))
+ax7.tick_params(axis='x', labelsize=10)
+ax7.tick_params(axis='y', labelsize=10)
+fig7.tight_layout()
+plt.show()
+
 #%% Save checkpoint
 checkpoint = {
     "model_state_dict": model.state_dict(),
@@ -364,6 +495,7 @@ checkpoint = {
     "Linf_list": Linf_list,
     "LBC_list": LBC_list,
     "total_loss_list": total_loss_list,
+    "L2RE_list":L2RE_list
 }
 
 torch.save(checkpoint, "Simple_BBH_Checkpoint.pt")
@@ -371,7 +503,7 @@ torch.save(checkpoint, "Simple_BBH_Checkpoint.pt")
 print('Checkpoint saved')
 
 #%% Load checkpoint
-checkpoint = torch.load("Simple_BBH_Checkpoint.pt")
+checkpoint = torch.load("Simple_BBH_Checkpoint.pt", weights_only=False)
 
 model = nn.Sequential(
     nn.Linear(3, 64),
@@ -403,8 +535,11 @@ L2_list = checkpoint["L2_list"]
 Linf_list = checkpoint["Linf_list"]
 LBC_list = checkpoint["LBC_list"]
 total_loss_list = checkpoint["total_loss_list"]
+L2RE_list = checkpoint["L2RE_list"]
 
 start_epoch = len(total_loss_list) + 1
 
 print('Checkpoint loaded')
-print('Start epoch: {}'.format(start_epoch+1))
+print('Start epoch: {}'.format(start_epoch))
+
+#%%
