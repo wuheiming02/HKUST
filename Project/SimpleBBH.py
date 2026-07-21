@@ -128,6 +128,28 @@ def SobolSurface(n_points=5e4, radius=30):
 def CalcUg(X):
     total = torch.zeros(X.shape[0], 1, dtype=torch.float)
 
+    def u0P_u2P_stable(curly_R):
+        R = curly_R
+
+        u0 = torch.empty_like(R)
+        u2 = torch.empty_like(R)
+
+        small = R < 1e-1
+        large = ~small
+
+        Rs = R[small]
+        if Rs.numel() > 0:
+            u0[small] = (1/32 - Rs.pow(5)/32 + 5*Rs.pow(6)/32 - 15*Rs.pow(7)/32 + 35*Rs.pow(8)/32 - 35*Rs.pow(9)/16 + 63*Rs.pow(10)/16 - 105*Rs.pow(11)/16 + 165*Rs.pow(12)/16 - 495*Rs.pow(13)/32 + 715*Rs.pow(14)/32)
+            u2[small] = (Rs.pow(2)/400 - Rs.pow(5)/32 + 7*Rs.pow(6)/48 - 21*Rs.pow(7)/50 + 21*Rs.pow(8)/22 - 15*Rs.pow(9)/8 + 693*Rs.pow(10)/208 - 11*Rs.pow(11)/2 + 429*Rs.pow(12)/50 - 819*Rs.pow(13)/64 + 5005*Rs.pow(14)/272)
+
+        Rl = R[large]
+        if Rl.numel() > 0:
+            l = 1 / (1 + Rl)
+            u0[large] = (5/32* (l - 2*l.pow(2) + 2*l.pow(3) - l.pow(4) + 0.2*l.pow(5)))
+            u2[large] = (15*l + 132*l.pow(2) + 53*l.pow(3) + 96*l.pow(4) + 82*l.pow(5) + 84*l.pow(5)/Rl + 84*torch.log(l)/Rl.pow(2)) / (80 * Rl)
+
+        return u0, u2
+
     for n in range(0, 2):
         m = masses[n]
         P = momenta[n]
@@ -147,22 +169,17 @@ def CalcUg(X):
         mu_P = torch.sum(r_hat * P_hat.view(1, 3), dim=1, keepdim=True).clamp(-1, 1)
         P2 = 0.5 * (3 * mu_P.pow(2) - 1)
 
-        u0P = (5/32) * (l-2*l.pow(2) + 2*l.pow(3) - l.pow(4) + 0.2*l.pow(5))
-        u2P = (15*l + 132*l.pow(2) + 53*l.pow(3) + 96*l.pow(4) + 82*l.pow(5) + 84*l.pow(5)/curly_R + 84*torch.log(l)/curly_R.pow(2)) / (80 * curly_R)
+        u0P, u2P = u0P_u2P_stable(curly_R)
 
         curly_P = 2 * P_mag / m
-
         total = total + curly_P.pow(2) * (u0P + u2P * P2)
 
     return total
     
-def WindowFunction(X):
+def WindowFunction(X, ug_min, ug_max):
     ug = CalcUg(X)
-    with torch.no_grad():
-        u_min = ug.min().detach()
-        u_max = ug.max().detach()
 
-    return (ug - u_min) / (u_max - u_min)
+    return (ug - ug_min) / (ug_max - ug_min)
 
 def EstimateKappa():
     kappa_boundary = SobolSurface()
@@ -214,9 +231,9 @@ def EstimateKappa():
     return kappa_mid
 
 #%% Loss functions
-def Ansatz(h_theta, X, kappa, c_mag=1):
+def Ansatz(h_theta, X, kappa, ug_min, ug_max, c_mag=1):
     ug = CalcUg(X)
-    W = WindowFunction(X)
+    W = WindowFunction(X, ug_min, ug_max)
     u_theta = kappa * ug * (1 + c_mag * W * torch.tanh(h_theta))
     
     return u_theta
@@ -236,7 +253,7 @@ def BoundaryResidual(u_theta, X):
     return torch.linalg.vecdot(grad_u, n).unsqueeze(1) + u_theta / 30
 
 def SoftLinfLoss(res, beta=2.5):
-    abs_res = res.reshape(-1)
+    abs_res = res.abs().reshape(-1)
     n = len(abs_res)
 
     return (torch.logsumexp(beta * abs_res, dim=0) - np.log(n)) / beta
@@ -302,6 +319,12 @@ kappa = EstimateKappa()
 
 X_int = GenXint().requires_grad_(True)
 X_bound = GenXbound().requires_grad_(True)
+X_train = torch.concat([X_int, X_bound])
+ug_train = CalcUg(X_train)
+with torch.no_grad():
+    ug_min = ug_train.detach().min()
+    ug_max = ug_train.detach().max()
+
 
 ema_L2 = None
 ema_Linf = None
@@ -326,10 +349,10 @@ for epoch in tqdm(range(start_epoch, start_epoch+n_epoch)):
     model.train()
 
     h_theta_int = model(X_int)
-    u_theta_int = Ansatz(h_theta_int, X_int, kappa)
+    u_theta_int = Ansatz(h_theta_int, X_int, kappa, ug_min, ug_max)
 
     h_theta_bound = model(X_bound)
-    u_theta_bound = Ansatz(h_theta_bound, X_bound, kappa)
+    u_theta_bound = Ansatz(h_theta_bound, X_bound, kappa, ug_min, ug_max)
 
     L2, Linf, LBC = RawLoss(u_theta_int, u_theta_bound, X_int, X_bound)
     L2_list.append(L2.detach())
@@ -342,7 +365,7 @@ for epoch in tqdm(range(start_epoch, start_epoch+n_epoch)):
     model.eval()
     with torch.no_grad():
         h_theta_test = model(X_test)
-        u_theta_test = Ansatz(h_theta_test, X_test, kappa)
+        u_theta_test = Ansatz(h_theta_test, X_test, kappa, ug_min, ug_max)
 
         u_theta_test = u_theta_test.detach().numpy().flatten()
         L2RE = np.sqrt(((u_theta_test - y_test)**2).sum() / (y_test**2).sum())
@@ -403,7 +426,7 @@ cbar4 = fig4.colorbar(heatmap4)
 cbar4.set_label('$u_{TP}$', fontsize =16, rotation=0)
 cbar4.ax.tick_params(labelsize=12)
 ax4.set_xlabel('X', fontsize = 16)
-ax4.set_ylabel('Y', fontsize = 16)
+ax4.set_ylabel('Y', fontsize = 16, rotation=0)
 ax4.set_xlim(-31, 31)
 ax4.set_ylim(-31, 31)
 ax4.set_title('$u_{TP}$ in XY-plane',fontsize = 20)
@@ -414,7 +437,7 @@ plt.show()
 model.eval()
 with torch.no_grad():
     h_theta_2D = model(coords_2D)
-    u_theta_2D = Ansatz(h_theta_2D, coords_2D, kappa)
+    u_theta_2D = Ansatz(h_theta_2D, coords_2D, kappa, ug_min, ug_max)
 
 u_theta_2D = u_theta_2D.detach().flatten()
 
@@ -425,7 +448,7 @@ cbar5 = fig5.colorbar(heatmap5)
 cbar5.set_label('$u_{\\theta}$', fontsize =16, rotation=0)
 cbar5.ax.tick_params(labelsize=12)
 ax5.set_xlabel('X', fontsize = 16)
-ax5.set_ylabel('Y', fontsize = 16)
+ax5.set_ylabel('Y', fontsize = 16, rotation=0)
 ax5.set_xlim(-31, 31)
 ax5.set_ylim(-31, 31)
 ax5.set_title('Predicted $u_{\\theta}$ in XY-plane',fontsize = 20)
@@ -440,7 +463,7 @@ ax6.set_aspect('equal', adjustable='box')
 cbar6 = fig6.colorbar(heatmap6)
 cbar6.ax.tick_params(labelsize=12)
 ax6.set_xlabel('X', fontsize = 16)
-ax6.set_ylabel('Y', fontsize = 16)
+ax6.set_ylabel('Y', fontsize = 16, rotation=0)
 ax6.set_xlim(-31, 31)
 ax6.set_ylim(-31, 31)
 ax6.set_title('$u_{\\theta} - u_{TP}$',fontsize = 20)
@@ -452,7 +475,7 @@ plt.show()
 model.eval()
 with torch.no_grad():
     h_theta_1D = model(coords_1D)
-    u_theta_1D = Ansatz(h_theta_1D, coords_1D, kappa)
+    u_theta_1D = Ansatz(h_theta_1D, coords_1D, kappa, ug_min, ug_max)
 
 u_theta_1D = u_theta_1D.detach().flatten()
 
@@ -461,7 +484,7 @@ ax7.grid(alpha=0.3)
 ax7.plot(coords_1D[:, 0], u_1D, '-', label='$u_{TP}$')
 ax7.plot(coords_1D[:, 0], u_theta_1D, '--', label='$u_{\\theta}$')
 ax7.set_xlabel('X', fontsize=12)
-ax7.set_ylabel('u', fontsize=12)
+ax7.set_ylabel('u', fontsize=12, rotation=0)
 ax7.set_xlim(-30, 30)
 ax7.set_ylim(0)
 ax7.set_title('Gravitational Correction to $\\Psi$ from TwoPunctures', fontsize=16)
@@ -480,6 +503,8 @@ checkpoint = {
     "model_state_dict": model.state_dict(),
     "X_int": X_int.detach(),
     "X_bound": X_bound.detach(),
+    "ug_min":ug_min,
+    "ug_max":ug_max,
 
     "kappa": kappa,
 
@@ -522,6 +547,8 @@ kappa = checkpoint["kappa"]
 
 X_int = checkpoint["X_int"].requires_grad_(True)
 X_bound = checkpoint["X_bound"].requires_grad_(True)
+ug_min = checkpoint["ug_min"]
+ug_max = checkpoint["ug_max"]
 
 ema_L2 = checkpoint["ema_L2"]
 ema_Linf = checkpoint["ema_Linf"]
