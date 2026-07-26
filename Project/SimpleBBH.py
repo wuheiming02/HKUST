@@ -26,7 +26,7 @@ X_test = torch.tensor(X_test, dtype=torch.float)
 npz_2D = np.load('TwoPunctures_5_2D.npz')
 coords_2D = npz_2D['coords']
 u_2D = npz_2D['u']
-coords_2D_idx = np.where(coords_2D[:, 2]==0)[0]
+coords_2D_idx = np.where((coords_2D[:, 2]==0))[0]
 coords_2D = coords_2D[coords_2D_idx, :]
 u_2D = u_2D[coords_2D_idx]
 coords_2D = torch.tensor(coords_2D, dtype=torch.float)
@@ -421,6 +421,7 @@ plt.show()
 #%% Plot 2D comparison
 fig4, ax4 = plt.subplots(1,1,figsize = (8,6),dpi = 150)
 heatmap4 = ax4.scatter(coords_2D[:, 0],  coords_2D[:, 1], c=u_2D, cmap='plasma')
+ax4.grid(alpha=0.2)
 ax4.set_aspect('equal', adjustable='box')
 cbar4 = fig4.colorbar(heatmap4)
 cbar4.set_label('$u_{TP}$', fontsize =16, rotation=0)
@@ -443,6 +444,7 @@ u_theta_2D = u_theta_2D.detach().flatten()
 
 fig5, ax5 = plt.subplots(1,1,figsize = (8,6),dpi = 150)
 heatmap5 = ax5.scatter(coords_2D[:, 0],  coords_2D[:, 1], c=u_theta_2D, cmap='plasma')
+ax5.grid(alpha=0.2)
 ax5.set_aspect('equal', adjustable='box')
 cbar5 = fig5.colorbar(heatmap5)
 cbar5.set_label('$u_{\\theta}$', fontsize =16, rotation=0)
@@ -459,6 +461,7 @@ plt.show()
 norm6 = colors.TwoSlopeNorm(vmin=-(abs(u_theta_2D-u_2D).max()), vcenter=0.0, vmax=abs(u_theta_2D-u_2D).max())
 fig6, ax6 = plt.subplots(1,1,figsize = (8,6),dpi = 160)
 heatmap6 = ax6.scatter(coords_2D[:, 0],  coords_2D[:, 1], c=u_theta_2D-u_2D, norm=norm6, cmap='RdBu')
+ax6.grid(alpha=0.2)
 ax6.set_aspect('equal', adjustable='box')
 cbar6 = fig6.colorbar(heatmap6)
 cbar6.ax.tick_params(labelsize=12)
@@ -487,7 +490,7 @@ ax7.set_xlabel('X', fontsize=12)
 ax7.set_ylabel('u', fontsize=12, rotation=0)
 ax7.set_xlim(-30, 30)
 ax7.set_ylim(0)
-ax7.set_title('Gravitational Correction to $\\Psi$ from TwoPunctures', fontsize=16)
+ax7.set_title('Gravitational Correction u to $\\Psi$', fontsize=16)
 ax7.legend(loc='upper right', fontsize=10)
 ax7.xaxis.set_major_locator(MultipleLocator(10))
 ax7.xaxis.set_minor_locator(MultipleLocator(2))
