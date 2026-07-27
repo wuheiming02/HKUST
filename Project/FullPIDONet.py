@@ -29,10 +29,10 @@ torch.manual_seed(42)
 def GenBranchSamples(m1):
     N = m1.shape[0]
     m2 = 1 - m1
-    x1 = torch.tensor([[3]] * N, dtype=torch.float)
+    x1 = torch.full_like(m1, 3.0)
     y1 = torch.zeros_like(m1)
     z1 = torch.zeros_like(m1)
-    x2 = torch.tensor([[-3]] * N, dtype=torch.float)
+    x2 = torch.full_like(m1, -3.0)
     y2 = torch.zeros_like(m1)
     z2 = torch.zeros_like(m1)
     P1x = torch.zeros_like(m1)
@@ -69,30 +69,31 @@ coords_05 = npz_05['coords']
 u_05 = npz_05['u']
 params_05 = GenBranchSamples(torch.tensor([[0.5]] * len(u_05), dtype=torch.float).reshape(-1, 1))
 
-branch_sample = torch.concat([params_01, params_02, params_03, params_04, params_05])
-trunk_sample = np.concat([coords_01, coords_02, coords_03, coords_04, coords_05])
-y_sample = np.concat([u_01, u_02, u_03, u_04, u_05])
+branch_data = torch.concat([params_01, params_02, params_03, params_04, params_05])
+trunk_data = np.concat([coords_01, coords_02, coords_03, coords_04, coords_05])
+u_data = np.concat([u_01, u_02, u_03, u_04, u_05])
 
-trunk_sample = torch.tensor(trunk_sample, dtype=torch.float)
-y_sample = torch.tensor(y_sample, dtype=torch.float)
+trunk_data = torch.tensor(trunk_data, dtype=torch.float)
+u_data = torch.tensor(u_data, dtype=torch.float).reshape(-1, 1)
 
-dataset = TensorDataset(branch_sample, trunk_sample, y_sample)
-dataset_train, dataset_validate, dataset_other = random_split(
+dataset = TensorDataset(branch_data, trunk_data, u_data)
+dataset_train, dataset_validate = random_split(
     dataset = dataset,
-    lengths = [0.08, 0.02, 0.9],
+    lengths = [0.8, 0.2],
     generator = torch.Generator().manual_seed(42)
 )
 
-idx_train = torch.as_tensor(dataset_train.indices, dtype=torch.long)
-idx_validate = torch.as_tensor(dataset_validate.indices, dtype=torch.long)
+dloader_data_train = DataLoader(
+    dataset = dataset_train,
+    batch_size = 256,
+    shuffle = True
+)
 
-branch_train = branch_sample[idx_train]
-trunk_train = trunk_sample[idx_train]
-u_train = y_sample[idx_train]
-
-branch_validate = branch_sample[idx_validate]
-trunk_validate = trunk_sample[idx_validate]
-u_validate = y_sample[idx_validate]
+dloader_data_validate = DataLoader(
+    dataset = dataset_validate,
+    batch_size = 256,
+    shuffle = True
+)
 
 def GenXint(n_points=1e6):
     directions = torch.randn(int(n_points), 3, dtype=torch.float)
@@ -103,14 +104,14 @@ def GenXint(n_points=1e6):
 
     return radii * directions, branch_interior
 
-def GenXsur(n_points=1e6):
+def GenXext(n_points=1e6):
     directions = torch.randn(int(n_points), 3, dtype=torch.float)
     directions = directions / torch.linalg.norm(directions, dim=1, keepdim=True).clamp_min(1e-12)
     radii = 20 * torch.rand(int(n_points), 1, dtype=torch.float) + 10
     m1 = torch.rand(int(n_points), 1, dtype=torch.float) * 0.4 + 0.1
-    branch_sur = GenBranchSamples(m1)
+    branch_ext = GenBranchSamples(m1)
 
-    return radii * directions, branch_sur
+    return radii * directions, branch_ext
 
 def GenXbound(n_points=2e5):
     directions = torch.randn(int(n_points), 3, dtype=torch.float)
@@ -120,23 +121,29 @@ def GenXbound(n_points=2e5):
 
     return 30 * directions, branch_boundary
 
-trunk_int, branch_int = GenXint(1e5)
-trunk_sur, branch_sur = GenXsur(1e5)
-trunk_bound, branch_bound = GenXbound(2e4)
+trunk_int, branch_int = GenXint(1e6)
+trunk_ext, branch_ext = GenXext(1e6)
+trunk_bound, branch_bound = GenXbound(2e5)
 
-trunk_int = torch.concat([trunk_int, trunk_sur])
-branch_int = torch.concat([branch_int, branch_sur])
+trunk_int = torch.concat([trunk_int, trunk_ext])
+branch_int = torch.concat([branch_int, branch_ext])
 
-trunk_train = trunk_train.clone().detach().requires_grad_(True).to(device, non_blocking=True)
-branch_train = branch_train.clone().detach().to(device, non_blocking=True)
-u_train = u_train.clone().detach().to(device, non_blocking=True)
-trunk_validate = trunk_validate.clone().detach().requires_grad_(True).to(device, non_blocking=True)
-branch_validate = branch_validate.clone().detach().to(device, non_blocking=True)
-u_validate = u_validate.clone().detach().to(device, non_blocking=True)
-trunk_int = trunk_int.clone().detach().requires_grad_(True).to(device, non_blocking=True)
-branch_int = branch_int.clone().detach().to(device, non_blocking=True)
-trunk_bound = trunk_bound.clone().detach().requires_grad_(True).to(device, non_blocking=True)
-branch_bound = branch_bound.clone().detach().to(device, non_blocking=True)
+dataset_int = TensorDataset(branch_int, trunk_int)
+
+dloader_int = DataLoader(
+    dataset = dataset_int,
+    batch_size = 256,
+    shuffle = True
+)
+
+dataset_bound = TensorDataset(branch_bound, trunk_bound)
+
+dloader_bound = DataLoader(
+    dataset = dataset_bound,
+    batch_size = 256,
+    shuffle = True
+)
+
 
 #%% Physics
 def KBar(trunk, branch):
@@ -207,7 +214,7 @@ def Laplacian(u, trunk):
 
     return fxx + fyy + fzz
 
-#%% Kappa
+
 def CalcUg(trunk, branch):
     m1 = branch[:, 0:1]
     m2 = branch[:, 1:2]
@@ -267,15 +274,10 @@ def CalcUg(trunk, branch):
 
     return total
 
-def WindowFunction(trunk, branch):
-    ug = CalcUg(trunk, branch)
-
-    return (ug - ug_min) / (ug_max - ug_min)
-
 #%% Loss functions
 def Ansatz(h_theta, trunk, branch, c_mag=1):
     ug = CalcUg(trunk, branch)
-    W = WindowFunction(trunk, branch)
+    W = (ug - ug_min) / (ug_max - ug_min)
     u_theta = kappa * ug * (1 + c_mag * W * torch.tanh(h_theta))
     
     return u_theta
@@ -295,26 +297,13 @@ def BoundaryResidual(u_theta, trunk):
     return torch.linalg.vecdot(grad_u, n).unsqueeze(1) + u_theta / 30
 
 def SoftLinfLoss(res, beta=10):
-    abs_res = res.abs().reshape(-1)
-    n = len(abs_res)
+    abs_res = res.abs().reshape(-1) * beta
 
-    return (torch.logsumexp(beta * abs_res, dim=0) - np.log(n)) / beta
-
-def RawLoss(u_theta_train, u_theta_data, u_theta_int, u_theta_bound, trunk_train_int, branch_train_int, trunk_train_bound, branch_train_bound):
-    res_data = u_theta_train - u_theta_data
-    res_int = PdeResidual(u_theta_int, trunk_train_int, branch_train_int)
-    res_bound = BoundaryResidual(u_theta_bound, trunk_train_bound)
-
-    L_data = torch.mean(res_data.pow(2))
-    L2 = torch.mean(res_int.pow(2))
-    L_inf = SoftLinfLoss(res_int)
-    LBC = torch.mean(res_bound.pow(2))
-
-    return L_data, L2, L_inf, LBC
+    return (torch.logsumexp(abs_res, dim=0) - np.log(abs_res.numel())) / beta
 
 def ScaledTotalLoss(L_data, L2, L_inf, LBC):
     global ema_L_data, ema_L2, ema_L_inf, ema_LBC
-    alpha = 0.95
+    alpha = 0.999
 
     with torch.no_grad():
         if ema_L2 is None:
@@ -328,10 +317,10 @@ def ScaledTotalLoss(L_data, L2, L_inf, LBC):
             ema_L_inf = alpha * ema_L_inf + (1 - alpha) * L_inf.detach()
             ema_LBC = alpha * ema_LBC + (1 - alpha) * LBC.detach()
 
-    L_data_tilde = L_data / ema_L_data
-    L2_tilde = L2 / ema_L2
-    L_inf_tilde = L_inf / ema_L_inf
-    LBC_tilde = LBC / ema_LBC
+    L_data_tilde = L_data / ema_L_data.clamp_min(1e-12)
+    L2_tilde = L2 / ema_L2.clamp_min(1e-12)
+    L_inf_tilde = L_inf / ema_L_inf.clamp_min(1e-12)
+    LBC_tilde = LBC / ema_LBC.clamp_min(1e-12)
 
     return w_data * L_data_tilde + w2 * L2_tilde + w_inf * L_inf_tilde + w_rob * LBC_tilde
 
@@ -393,43 +382,139 @@ def ModelForward(trunk_net, branch_net, trunk, branch):
 
     return u_theta
 
-def train_epoch(epoch):
+def NextBatch(iterator, dloader):
+    try:
+        batch = next(iterator)
+
+    except StopIteration:
+        iterator = iter(dloader)
+        batch = next(iterator)
+
+    return batch, iterator
+
+def train_epoch(epoch, beta=10.0):
     trunk_net.train()
     branch_net.train()
 
-    u_pred_train = ModelForward(trunk_net, branch_net, trunk_train, branch_train)
-    u_int_train = ModelForward(trunk_net, branch_net, trunk_int, branch_int)
-    u_bound_train = ModelForward(trunk_net, branch_net, trunk_bound, branch_bound)
+    n_data_batches = len(dloader_data_train)
+    n_int_batches = len(dloader_int)
+    n_bound_batches = len(dloader_bound)
+    n_steps = max(n_data_batches, n_int_batches, n_bound_batches)
 
-    L_data, L2, L_inf, LBC = RawLoss(u_train, u_pred_train, u_int_train, u_bound_train, trunk_int, branch_int, trunk_bound, branch_bound)
-    total_loss = ScaledTotalLoss(L_data, L2, L_inf, LBC)
+    data_iterator = iter(dloader_data_train)
+    int_iterator = iter(dloader_int)
+    bound_iterator = iter(dloader_bound)
 
-    optimizer.zero_grad(set_to_none=True)
-    total_loss.backward()
-    optimizer.step()
+
+    n_data_points, n_int_points, n_linf_points, n_bound_points = 0, 0, 0, 0
+    sum_data_squared = 0.0
+    sum_int_squared = 0.0
+    sum_bound_squared = 0.0
+    global_linf_logsumexp = None
+
+    sum_scaled_total_loss = 0.0
+
+    for step in tqdm(range(n_steps), desc=f"Epoch {epoch} (training)", leave=False):
+        data_batch, data_iterator = NextBatch(data_iterator, dloader_data_train)
+        int_batch, int_iterator = NextBatch(int_iterator, dloader_int)
+        bound_batch, bound_iterator = NextBatch(bound_iterator, dloader_bound)
+
+        branch_data_batch, trunk_data_batch, u_data_batch = data_batch
+        branch_int_batch, trunk_int_batch = int_batch
+        branch_bound_batch, trunk_bound_batch = bound_batch
+
+        branch_data_batch = branch_data_batch.to(device, non_blocking=True)
+        trunk_data_batch = trunk_data_batch.to(device, non_blocking=True).detach().requires_grad_(True)
+        u_data_batch = u_data_batch.to(device, non_blocking=True).reshape(-1, 1)
+
+        branch_int_batch = branch_int_batch.to(device, non_blocking=True)
+        trunk_int_batch = trunk_int_batch.to(device, non_blocking=True).detach().requires_grad_(True)
+
+        branch_bound_batch = branch_bound_batch.to(device, non_blocking=True)
+        trunk_bound_batch = trunk_bound_batch.to(device, non_blocking=True).detach().requires_grad_(True)
+
+        u_pred_data = ModelForward(trunk_net, branch_net, trunk_data_batch, branch_data_batch)
+        res_data = u_pred_data - u_data_batch
+        L_data_batch = res_data.pow(2).mean()
+
+        u_pred_int = ModelForward(trunk_net, branch_net, trunk_int_batch, branch_int_batch)
+        res_int = PdeResidual(u_pred_int, trunk_int_batch, branch_int_batch)
+        L2_batch = res_int.pow(2).mean()
+        L_inf_batch = SoftLinfLoss(res_int, beta=beta)
+
+        u_pred_bound = ModelForward(trunk_net, branch_net, trunk_bound_batch, branch_bound_batch)
+        res_bound = BoundaryResidual(u_pred_bound, trunk_bound_batch)
+        LBC_batch = res_bound.pow(2).mean()
+
+        total_loss_batch = ScaledTotalLoss(L_data_batch, L2_batch, L_inf_batch, LBC_batch)
+
+        optimizer.zero_grad(set_to_none=True)
+        total_loss_batch.backward()
+        optimizer.step()
+        sum_scaled_total_loss = sum_scaled_total_loss + total_loss_batch.detach().item()
+
+        if step < n_data_batches:
+            res_data_detached = res_data.detach()
+            sum_data_squared = sum_data_squared + res_data_detached.pow(2).sum().item()
+            n_data_points = n_data_points + res_data_detached.numel()
+
+        if step < n_int_batches:
+            res_int_detached = res_int.detach()
+            sum_int_squared = sum_int_squared + res_int_detached.pow(2).sum().item()
+            n_int_points = n_int_points + res_int_detached.numel()
+
+            batch_logsumexp = torch.logsumexp(beta * res_int_detached.abs().reshape(-1),dim=0).cpu()
+
+            if global_linf_logsumexp is None:
+                global_linf_logsumexp = batch_logsumexp
+            else:
+                global_linf_logsumexp = torch.logaddexp(global_linf_logsumexp, batch_logsumexp)
+            n_linf_points += res_int_detached.numel()
+
+        if step < n_bound_batches:
+            res_bound_detached = res_bound.detach()
+            sum_bound_squared = sum_bound_squared + res_bound_detached.pow(2).sum().item()
+            n_bound_points += res_bound_detached.numel()
+
+    epoch_L_data = sum_data_squared / max(n_data_points, 1)
+    epoch_L2 = sum_int_squared / max(n_int_points, 1)
+    epoch_LBC = sum_bound_squared / max(n_bound_points, 1)
+    epoch_L_inf = (global_linf_logsumexp.item() - np.log(max(n_linf_points, 1))) / beta
+    epoch_total_loss = sum_scaled_total_loss / n_steps
 
     trunk_net.eval()
     branch_net.eval()
 
+    sum_u_res, sum_u_batch = 0, 0
+
     with torch.no_grad():
-        u_pred_validate = ModelForward(trunk_net, branch_net, trunk_validate, branch_validate)
+        for branch_valid_batch, trunk_valid_batch, u_valid_batch in tqdm(dloader_data_validate, desc=f"Epoch {epoch} (validating data)", leave=False):
+            branch_valid_batch = branch_valid_batch.to(device, non_blocking=True)
+            trunk_valid_batch = trunk_valid_batch.to(device, non_blocking=True).detach().requires_grad_(True)
+            u_valid_batch = u_valid_batch.to(device, non_blocking=True)
+    
+            u_pred_valid = ModelForward(trunk_net, branch_net, trunk_valid_batch, branch_valid_batch)
+            u_pred_valid = u_pred_valid.detach().cpu().numpy().flatten()
+            u_valid_batch = u_valid_batch.detach().cpu().numpy().flatten()
 
-        u_pred_validate = u_pred_validate.detach().cpu().numpy().flatten()
-        u_valid = u_validate.clone().detach().cpu().numpy().flatten()
-        L2RE = np.sqrt(((u_pred_validate - u_valid.flatten())**2).sum() / (u_valid.flatten()**2).sum())
+            sum_u_res = sum_u_res + ((u_pred_valid - u_valid_batch)**2).sum()
+            sum_u_batch = sum_u_batch + (u_valid_batch**2).sum()
 
-    return L_data, L2, L_inf, LBC, total_loss, L2RE
+        L2RE = np.sqrt(sum_u_res / sum_u_batch)
+
+    return epoch_L_data, epoch_L2, epoch_L_inf, epoch_LBC, epoch_total_loss, L2RE
+
 #%% Training code
 n_epoch = 5000
 
-for epoch in tqdm(range(start_epoch, start_epoch+n_epoch)):
-    L_data, L2, L_inf, LBC, total_loss, L2RE = train_epoch(epoch)
+for epoch in range(start_epoch, start_epoch+n_epoch):
+    L_data, L2, L_inf, LBC, total_loss, L2RE = train_epoch(epoch, beta=10)
 
-    L_data_list.append(L_data.detach().item())
-    L2_list.append(L2.detach().item())
-    L_inf_list.append(L_inf.detach().item())
-    LBC_list.append(LBC.detach().item())
-    total_loss_list.append(total_loss.detach().item())
+    L_data_list.append(L_data)
+    L2_list.append(L2)
+    L_inf_list.append(L_inf)
+    LBC_list.append(LBC)
+    total_loss_list.append(total_loss)
     L2RE_list.append(L2RE)
 
 print('Training finished')
@@ -478,20 +563,15 @@ plt.show()
 
 #%% Save checkpoint
 checkpoint = {
-    "trunk_train":trunk_train.detach(),
-    "branch_train":branch_train.detach(),
-    "u_train":u_train.detach(),
-    "trunk_validate":trunk_validate.detach(),
-    "branch_validate":branch_validate.detach(),
-    "u_validate":u_validate.detach(),
-    "trunk_int":trunk_int.detach(),
-    "branch_int":branch_int.detach(),
-    "trunk_bound":trunk_bound.detach(),
-    "branch_bound":branch_bound.detach(),
+    "dloader_data_train":dloader_data_train,
+    "dloader_data_validate":dloader_data_validate,
+    "dloader_int":dloader_int,
+    "dloader_bound":dloader_bound,
 
     "branch_net_state_dict": branch_net.state_dict(),
     "trunk_net_state_dict": trunk_net.state_dict(),
     "output_bias": output_bias.detach(),
+    "optimizer_state_dict":optimizer.state_dict(),
 
     "L_data_list": list(L_data_list),
     "L2_list": list(L2_list),
@@ -542,21 +622,16 @@ trunk_net.load_state_dict(checkpoint["trunk_net_state_dict"])
 output_bias = nn.Parameter(checkpoint["output_bias"])
 
 optimizer = torch.optim.Adam(list(branch_net.parameters()) + list(trunk_net.parameters()) + [output_bias], lr=1e-4)
+optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
 kappa = 0.635
 ug_min = 0.0006
 ug_max = 0.0415
 
-trunk_train = checkpoint["trunk_train"].requires_grad_(True).to(device, non_blocking=True)
-branch_train = checkpoint["branch_train"].requires_grad_(True).to(device, non_blocking=True)
-u_train = checkpoint["u_train"].requires_grad_(True).to(device, non_blocking=True)
-trunk_validate = checkpoint["trunk_validate"].requires_grad_(True).to(device, non_blocking=True)
-branch_validate = checkpoint["branch_validate"].requires_grad_(True).to(device, non_blocking=True)
-u_validate = checkpoint["u_validate"].requires_grad_(True).to(device, non_blocking=True)
-trunk_int = checkpoint["trunk_int"].requires_grad_(True).to(device, non_blocking=True)
-branch_int = checkpoint["branch_int"].requires_grad_(True).to(device, non_blocking=True)
-trunk_bound = checkpoint["trunk_bound"].requires_grad_(True).to(device, non_blocking=True)
-branch_bound = checkpoint["branch_bound"].requires_grad_(True).to(device, non_blocking=True)
+dloader_data_train = checkpoint["dloader_data_train"]
+dloader_data_validate = checkpoint["dloader_data_validate"]
+dloader_int = checkpoint["dloader_int"]
+dloader_bound = checkpoint["dloader_bound"]
 
 ema_L_data = checkpoint["ema_L_data"]
 ema_L2 = checkpoint["ema_L2"]
