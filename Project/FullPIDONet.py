@@ -10,7 +10,19 @@ from torch.utils.data import DataLoader
 from torch.utils.data import random_split
 from tqdm.auto import tqdm
 
-#%% Generate datasets (Do not run)
+#%% Check CUDA
+print("PyTorch version:", torch.__version__)
+print("CUDA available:", torch.cuda.is_available())
+print("PyTorch CUDA version:", torch.version.cuda)
+
+if torch.cuda.is_available():
+    print("GPU:", torch.cuda.get_device_name(0))
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+print("Using device:", device)
+
+#%% Generate datasets
 np.random.seed(42)
 torch.manual_seed(42)
 
@@ -82,20 +94,7 @@ branch_validate = branch_sample[idx_validate]
 trunk_validate = trunk_sample[idx_validate]
 u_validate = y_sample[idx_validate]
 
-dloader_data_train = DataLoader(
-    dataset = dataset_train,
-    batch_size = 1024,
-    shuffle = True,
-    drop_last = True
-)
-
-dloader_data_validate = DataLoader(
-    dataset = dataset_validate,
-    batch_size = 64,
-    shuffle = True
-)
-
-def GenXint(n_points=1e5):
+def GenXint(n_points=1e6):
     directions = torch.randn(int(n_points), 3, dtype=torch.float)
     directions = directions / torch.linalg.norm(directions, dim=1, keepdim=True).clamp_min(1e-12)
     radii = 10 * torch.rand(int(n_points), 1, dtype=torch.float)
@@ -104,7 +103,7 @@ def GenXint(n_points=1e5):
 
     return radii * directions, branch_interior
 
-def GenXsur(n_points=1e5):
+def GenXsur(n_points=1e6):
     directions = torch.randn(int(n_points), 3, dtype=torch.float)
     directions = directions / torch.linalg.norm(directions, dim=1, keepdim=True).clamp_min(1e-12)
     radii = 20 * torch.rand(int(n_points), 1, dtype=torch.float) + 10
@@ -113,7 +112,7 @@ def GenXsur(n_points=1e5):
 
     return radii * directions, branch_sur
 
-def GenXbound(n_points=2e4):
+def GenXbound(n_points=2e5):
     directions = torch.randn(int(n_points), 3, dtype=torch.float)
     directions = directions / torch.linalg.norm(directions, dim=1, keepdim=True).clamp_min(1e-12)
     m1 = torch.rand(int(n_points), 1, dtype=torch.float) * 0.4 + 0.1
@@ -121,41 +120,23 @@ def GenXbound(n_points=2e4):
 
     return 30 * directions, branch_boundary
 
-trunk_int, branch_int = GenXint()
-trunk_sur, branch_sur = GenXsur()
-trunk_bound, branch_bound = GenXbound()
+trunk_int, branch_int = GenXint(1e5)
+trunk_sur, branch_sur = GenXsur(1e5)
+trunk_bound, branch_bound = GenXbound(2e4)
 
 trunk_int = torch.concat([trunk_int, trunk_sur])
 branch_int = torch.concat([branch_int, branch_sur])
 
-dataset_int = TensorDataset(branch_int, trunk_int)
-
-dloader_int = DataLoader(
-    dataset = dataset_int,
-    batch_size = 1024,
-    shuffle = True,
-    drop_last = True
-)
-
-dataset_bound = TensorDataset(branch_bound, trunk_bound)
-
-dloader_bound = DataLoader(
-    dataset = dataset_bound,
-    batch_size = 1024,
-    shuffle = True,
-    drop_last = True
-)
-
-trunk_train = trunk_train.clone().detach().requires_grad_(True)
-branch_train = branch_train.clone().detach()
-u_train = u_train.clone().detach()
-trunk_validate = trunk_validate.clone().detach().requires_grad_(True)
-branch_validate = branch_validate.clone().detach()
-u_validate = u_validate.clone().detach()
-trunk_int = trunk_int.clone().detach().requires_grad_(True)
-branch_int = branch_int.clone().detach()
-trunk_bound = trunk_bound.clone().detach().requires_grad_(True)
-branch_bound = branch_bound.clone().detach()
+trunk_train = trunk_train.clone().detach().requires_grad_(True).to(device, non_blocking=True)
+branch_train = branch_train.clone().detach().to(device, non_blocking=True)
+u_train = u_train.clone().detach().to(device, non_blocking=True)
+trunk_validate = trunk_validate.clone().detach().requires_grad_(True).to(device, non_blocking=True)
+branch_validate = branch_validate.clone().detach().to(device, non_blocking=True)
+u_validate = u_validate.clone().detach().to(device, non_blocking=True)
+trunk_int = trunk_int.clone().detach().requires_grad_(True).to(device, non_blocking=True)
+branch_int = branch_int.clone().detach().to(device, non_blocking=True)
+trunk_bound = trunk_bound.clone().detach().requires_grad_(True).to(device, non_blocking=True)
+branch_bound = branch_bound.clone().detach().to(device, non_blocking=True)
 
 #%% Physics
 def KBar(trunk, branch):
@@ -167,8 +148,8 @@ def KBar(trunk, branch):
     momenta = torch.stack([P_plus, P_minus], dim=1)
 
     n_points = trunk.shape[0]
-    delta = torch.eye(3, dtype=torch.float).view(1, 3, 3)
-    kbar = torch.zeros(n_points, 3, 3, dtype=torch.float)
+    delta = torch.eye(3, dtype=torch.float, device=device).view(1, 3, 3)
+    kbar = torch.zeros(n_points, 3, 3, dtype=torch.float, device=device)
 
     for n in range(0, 2):
         xn = trunk - positions[:, n]
@@ -196,7 +177,7 @@ def PsiSingular(trunk, branch):
     x2 = branch[:, 5:8]
     positions = torch.stack([x1, x2], dim=1)
 
-    psi = torch.ones(trunk.shape[0], 1, dtype=torch.float)
+    psi = torch.ones(trunk.shape[0], 1, dtype=torch.float, device=device)
     for n in range(0, 2):
         rn = torch.linalg.norm((trunk - positions[:, n]), dim=1, dtype=torch.float, keepdim=True).clamp_min(1e-12)
         psi = psi + masses[:, n:n+1] / (2 * rn)
@@ -227,34 +208,6 @@ def Laplacian(u, trunk):
     return fxx + fyy + fzz
 
 #%% Kappa
-def SobolVolume(n_points=5e6, radius=30):
-    engine = torch.quasirandom.SobolEngine(3, True, seed=42)
-    u = engine.draw(int(n_points)).clamp(1e-12, 1 - 1e-12)
-    r = radius * u[:, 0:1].pow(1/3)
-    cos_theta = 2 * u[:, 1:2] - 1
-    sin_theta = (1 - cos_theta.pow(2)).pow(1/2).clamp_min(0)
-    phi = 2 * np.pi * u[:, 2:3]
-
-    x = r * sin_theta * torch.cos(phi)
-    y = r * sin_theta * torch.sin(phi)
-    z = r * cos_theta
-
-    return torch.cat([x, y, z], dim=1)
-
-def SobolSurface(n_points=5e4, radius=30):
-    engine = torch.quasirandom.SobolEngine(2, True, seed=42)
-    u = engine.draw(int(n_points)).clamp(1e-12, 1 - 1e-12)
-    
-    cos_theta = 2 * u[:, 0:1] - 1
-    sin_theta = (1 - cos_theta.pow(2)).pow(1/2).clamp_min(0)
-    phi = 2 * np.pi * u[:, 1:2]
-
-    x = radius * sin_theta * torch.cos(phi)
-    y = radius * sin_theta * torch.sin(phi)
-    z = radius * cos_theta
-
-    return torch.cat([x, y, z], dim=1)
-
 def CalcUg(trunk, branch):
     m1 = branch[:, 0:1]
     m2 = branch[:, 1:2]
@@ -266,7 +219,7 @@ def CalcUg(trunk, branch):
     P_minus = branch[:, 11:14]
     momenta = torch.stack([P_plus, P_minus], dim=1)
 
-    total = torch.zeros(trunk.shape[0], 1, dtype=torch.float)
+    total = torch.zeros(trunk.shape[0], 1, dtype=torch.float, device=device)
 
     def u0P_u2P_stable(curly_R):
         R = curly_R
@@ -318,55 +271,6 @@ def WindowFunction(trunk, branch):
     ug = CalcUg(trunk, branch)
 
     return (ug - ug_min) / (ug_max - ug_min)
-
-def EstimateKappa():
-    kappa_boundary = SobolSurface()
-    kappa_boundary = kappa_boundary.clone().detach().requires_grad_(True)
-    ug_boundary = CalcUg(kappa_boundary)
-    grad_ug = Grad(ug_boundary, kappa_boundary, create_graph=False).detach()
-    
-    with torch.no_grad():
-    
-        n = kappa_boundary / 30
-        area = 4 * np.pi * 30**2
-        boundary_integrand = torch.linalg.vecdot(grad_ug, n).unsqueeze(1)
-        boundary_integral = (area * boundary_integrand.mean()).detach()
-
-        kappa_interior = SobolVolume()
-        ug_interior = CalcUg(kappa_interior)
-        psi = PsiSingular(kappa_interior)
-        k_bar = KBar(kappa_interior)
-        k2 = k_bar.pow(2).sum(dim=(1, 2)).unsqueeze(1)
-        volume = 4/3 * np.pi * 30**3
-
-        def f(guess_kappa):
-            volume_integrand = 1/8 * k2 * (psi + guess_kappa * ug_interior).clamp_min(1e-12).pow(-7)
-            volume_integral = (volume * volume_integrand.mean()).detach()
-
-            return volume_integral + guess_kappa * boundary_integral        
-        
-        kappa_high = 1000
-        kappa_low = 0
-
-        f_low = f(kappa_low)
-        f_high = f(kappa_high)
-
-        if f_high*f_low > 0:
-            return print('Does not bracket root')
-
-        while kappa_high - kappa_low > 1e-6:
-            kappa_mid = (kappa_high + kappa_low) / 2
-            f_high = f(kappa_high)
-            f_mid = f(kappa_mid)
-            if f_mid == 0:
-                break
-
-            if f_mid * f_high < 0:
-                kappa_low = kappa_mid
-            else:
-                kappa_high = kappa_mid
-
-    return kappa_mid
 
 #%% Loss functions
 def Ansatz(h_theta, trunk, branch, c_mag=1):
@@ -431,7 +335,7 @@ def ScaledTotalLoss(L_data, L2, L_inf, LBC):
 
     return w_data * L_data_tilde + w2 * L2_tilde + w_inf * L_inf_tilde + w_rob * LBC_tilde
 
-#%% Setup (Do not run)
+#%% Setup 
 kappa = 0.635
 ug_min = 0.0006
 ug_max = 0.0415
@@ -444,7 +348,7 @@ branch_net = nn.Sequential(
     nn.Linear(64, 64),
     nn.SiLU(),
     nn.Linear(64, 50)
-)
+).to(device)
 
 trunk_net = nn.Sequential(
     nn.Linear(3, 64),
@@ -454,9 +358,9 @@ trunk_net = nn.Sequential(
     nn.Linear(64, 64),
     nn.SiLU(),
     nn.Linear(64, 50)
-)
+).to(device)
 
-output_bias = nn.Parameter(torch.tensor([1.0], dtype=torch.float))
+output_bias = nn.Parameter(torch.tensor([1.0], dtype=torch.float, device=device))
 
 optimizer = torch.optim.Adam(list(branch_net.parameters()) + list(trunk_net.parameters()) + [output_bias], lr=1e-4)
 
@@ -489,73 +393,6 @@ def ModelForward(trunk_net, branch_net, trunk, branch):
 
     return u_theta
 
-# def train_epoch(epoch):
-#     u_pred_data_list, u_data_list = [], []
-#     trunk_int_list, branch_int_list, u_int_list = [], [], []
-#     trunk_bound_list, branch_bound_list, u_bound_list = [], [], []
-
-#     trunk_net.train()
-#     branch_net.train()
-
-#     for branch_data_train, trunk_data_train, u_data_train in tqdm(dloader_data_train, desc=f"Epoch {epoch} (training data)", leave=False):
-#         u_pred_train = ModelForward(trunk_net, branch_net, trunk_data_train, branch_data_train)
-
-#         u_pred_data_list.append(u_pred_train)
-#         u_data_list.append(u_data_train)
-
-#     u_pred_data_list = torch.concat(u_pred_data_list, dim=0)
-#     u_data_list = torch.concat(u_data_list, dim=0)
-
-#     for branch_int_train, trunk_int_train in tqdm(dloader_int, desc=f"Epoch {epoch} (training interior)", leave=False):
-#         u_int_train = ModelForward(trunk_net, branch_net, trunk_int_train, branch_int_train)
-    
-#         trunk_int_list.append(trunk_int_train)
-#         branch_int_list.append(branch_int_train)
-#         u_int_list.append(u_int_train)
-    
-#     trunk_int_list = torch.concat(trunk_int_list, dim=0)
-#     branch_int_list = torch.concat(branch_int_list, dim=0)
-#     u_int_list = torch.concat(u_int_list, dim=0)
-
-#     for branch_bound_train, trunk_bound_train in tqdm(dloader_bound, desc=f"Epoch {epoch} (training boundary)", leave=False):
-#         u_bound_train = ModelForward(trunk_net, branch_net, trunk_bound_train, branch_bound_train)
-    
-#         trunk_bound_list.append(trunk_bound_train)
-#         branch_bound_list.append(branch_bound_train)
-#         u_bound_list.append(u_bound_train)
-    
-#     trunk_bound_list = torch.concat(trunk_bound_list, dim=0)
-#     branch_bound_list = torch.concat(branch_bound_list, dim=0)
-#     u_bound_list = torch.concat(u_bound_list, dim=0)
-
-#     L_data, L2, L_inf, LBC = RawLoss(u_data_list, u_pred_data_list, u_int_list, u_bound_list, trunk_int_list, branch_int_list, trunk_bound_list, branch_bound_list)
-#     total_loss = ScaledTotalLoss(L_data, L2, L_inf, LBC)
-
-#     optimizer.zero_grad()
-#     total_loss.backward()
-#     optimizer.step()
-
-#     u_pred_validate_list, u_validate_list = [], []
-
-#     trunk_net.eval()
-#     branch_net.eval()
-
-#     with torch.no_grad():
-#         for branch_data_validate, trunk_data_validate, u_data_validate in tqdm(dloader_data_validate, desc=f"Epoch {epoch} (Validating data)", leave=False):
-#             u_pred_validate = ModelForward(trunk_net, branch_net, trunk_data_validate, branch_data_validate)
-
-#             u_pred_validate_list.append(u_pred_validate)
-#             u_validate_list.append(u_data_validate)
-
-#         u_pred_validate_list = torch.concat(u_pred_validate_list, dim=0)
-#         u_validate_list = torch.concat(u_validate_list, dim=0)
-
-#         u_pred_validate_list = u_pred_validate_list.detach().numpy().flatten()
-#         u_validate_list = u_validate_list.detach().numpy().flatten()
-#         L2RE = np.sqrt(((u_pred_validate_list - u_validate_list.flatten())**2).sum() / (u_validate_list.flatten()**2).sum())
-
-#     return L_data, L2, L_inf, LBC, L2RE
-
 def train_epoch(epoch):
     trunk_net.train()
     branch_net.train()
@@ -567,7 +404,7 @@ def train_epoch(epoch):
     L_data, L2, L_inf, LBC = RawLoss(u_train, u_pred_train, u_int_train, u_bound_train, trunk_int, branch_int, trunk_bound, branch_bound)
     total_loss = ScaledTotalLoss(L_data, L2, L_inf, LBC)
 
-    optimizer.zero_grad()
+    optimizer.zero_grad(set_to_none=True)
     total_loss.backward()
     optimizer.step()
 
@@ -577,13 +414,13 @@ def train_epoch(epoch):
     with torch.no_grad():
         u_pred_validate = ModelForward(trunk_net, branch_net, trunk_validate, branch_validate)
 
-        u_pred_validate = u_pred_validate.detach().numpy().flatten()
-        u_valid = u_validate.clone().detach().numpy().flatten()
+        u_pred_validate = u_pred_validate.detach().cpu().numpy().flatten()
+        u_valid = u_validate.clone().detach().cpu().numpy().flatten()
         L2RE = np.sqrt(((u_pred_validate - u_valid.flatten())**2).sum() / (u_valid.flatten()**2).sum())
 
     return L_data, L2, L_inf, LBC, total_loss, L2RE
 #%% Training code
-n_epoch = 500
+n_epoch = 5000
 
 for epoch in tqdm(range(start_epoch, start_epoch+n_epoch)):
     L_data, L2, L_inf, LBC, total_loss, L2RE = train_epoch(epoch)
@@ -669,12 +506,12 @@ checkpoint = {
     "ema_LBC": ema_LBC,
 }
 
-torch.save(checkpoint, "PIDONet_Checkpoint.pt")
+torch.save(checkpoint, "Full_PIDONet_Checkpoint.pt")
 
 print('Checkpoint saved')
 
 #%% Load checkpoint
-checkpoint = torch.load("PIDONet_Checkpoint.pt", weights_only=False)
+checkpoint = torch.load("Full_PIDONet_Checkpoint.pt", weights_only=False, map_location=device)
 
 kappa = 0.635
 ug_min = 0.0006
@@ -688,7 +525,7 @@ branch_net = nn.Sequential(
     nn.Linear(64, 64),
     nn.SiLU(),
     nn.Linear(64, 50)
-)
+).to(device)
 
 trunk_net = nn.Sequential(
     nn.Linear(3, 64),
@@ -698,7 +535,7 @@ trunk_net = nn.Sequential(
     nn.Linear(64, 64),
     nn.SiLU(),
     nn.Linear(64, 50)
-)
+).to(device)
 
 branch_net.load_state_dict(checkpoint["branch_net_state_dict"])
 trunk_net.load_state_dict(checkpoint["trunk_net_state_dict"])
@@ -710,16 +547,16 @@ kappa = 0.635
 ug_min = 0.0006
 ug_max = 0.0415
 
-trunk_train = checkpoint["trunk_train"].requires_grad_(True)
-branch_train = checkpoint["branch_train"]
-u_train = checkpoint["u_train"]
-trunk_validate = checkpoint["trunk_validate"].requires_grad_(True)
-branch_validate = checkpoint["branch_validate"]
-u_validate = checkpoint["u_validate"]
-trunk_int = checkpoint["trunk_int"].requires_grad_(True)
-branch_int = checkpoint["branch_int"]
-trunk_bound = checkpoint["trunk_bound"].requires_grad_(True)
-branch_bound = checkpoint["branch_bound"]
+trunk_train = checkpoint["trunk_train"].requires_grad_(True).to(device, non_blocking=True)
+branch_train = checkpoint["branch_train"].requires_grad_(True).to(device, non_blocking=True)
+u_train = checkpoint["u_train"].requires_grad_(True).to(device, non_blocking=True)
+trunk_validate = checkpoint["trunk_validate"].requires_grad_(True).to(device, non_blocking=True)
+branch_validate = checkpoint["branch_validate"].requires_grad_(True).to(device, non_blocking=True)
+u_validate = checkpoint["u_validate"].requires_grad_(True).to(device, non_blocking=True)
+trunk_int = checkpoint["trunk_int"].requires_grad_(True).to(device, non_blocking=True)
+branch_int = checkpoint["branch_int"].requires_grad_(True).to(device, non_blocking=True)
+trunk_bound = checkpoint["trunk_bound"].requires_grad_(True).to(device, non_blocking=True)
+branch_bound = checkpoint["branch_bound"].requires_grad_(True).to(device, non_blocking=True)
 
 ema_L_data = checkpoint["ema_L_data"]
 ema_L2 = checkpoint["ema_L2"]
