@@ -595,6 +595,7 @@ def train_epoch(epoch, beta=10.0):
 n_epoch = 5000
 patience = 200
 best_epoch = start_epoch - 1
+min_L2RE = np.inf
 
 for epoch in range(start_epoch, start_epoch+n_epoch):
     L_data, L2, L_inf, LBC, total_loss, L2RE = train_epoch(epoch, beta=10)
@@ -606,10 +607,11 @@ for epoch in range(start_epoch, start_epoch+n_epoch):
     total_loss_list.append(total_loss)
     L2RE_list.append(L2RE)
 
-    if L2RE < L2RE_list[best_epoch]:
+    if L2RE < min_L2RE:
         best_epoch = epoch
+        min_L2RE = L2RE
 
-    elif best_epoch <= epoch - patience and best_epoch > 300:
+    elif best_epoch <= epoch - patience and epoch > 300:
         break
 
 print('Training finished')

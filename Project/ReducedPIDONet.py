@@ -600,13 +600,52 @@ for epoch in tqdm(range(start_epoch, start_epoch+n_epoch)):
     if L2RE < L2RE_list[best_epoch]:
         best_epoch = epoch
 
-    elif best_epoch <= epoch - patience and best_epoch > 800:
+    elif best_epoch <= epoch - patience and epoch > 800:
         break
 
 print('Training finished')
 
-# Plot losses
+#%% Plot losses
 epochs = np.linspace(1, len(L_data_list), len(L_data_list))
+
+# fig1, ax1 = plt.subplots(1,1,figsize = (10,4),dpi = 150)
+# ax1.plot(epochs, total_loss_list, label='Scaled total loss', zorder=2)
+# ax1.set_xlabel('Epoch',fontsize = 16)
+# ax1.set_ylabel('Loss',fontsize = 16)
+# # ax1.set_yscale('log')
+# ax1.set_title('Loss during training',fontsize = 20)
+# ax1.tick_params(labelsize=12, which='both',top=True, right = True, direction='in')
+# ax1.grid(color='xkcd:dark blue',alpha = 0.2)
+# ax1.legend(loc='upper right',fontsize = 12)
+# plt.show()
+
+# total_loss = np.array(L_data_list) + np.array(L2_list) + np.array(L_inf_list) + np.array(LBC_list)
+
+# fig2, ax2 = plt.subplots(1,1,figsize = (10,4),dpi = 150)
+# ax2.plot(epochs, L_data_list, label='L_data', zorder=1)
+# ax2.plot(epochs, L2_list, label='L2', zorder=1)
+# ax2.plot(epochs, L_inf_list, label='L_inf', zorder=1)
+# ax2.plot(epochs, LBC_list, label='LBC', zorder=1)
+# # ax2.plot(epochs, total_loss, label='Total loss', zorder=2)
+# ax2.set_xlabel('Epoch',fontsize = 16)
+# ax2.set_ylabel('Loss',fontsize = 16)
+# ax2.set_yscale('log')
+# ax2.set_title('Loss during training',fontsize = 20)
+# ax2.tick_params(labelsize=12, which='both',top=True, right = True, direction='in')
+# ax2.grid(color='xkcd:dark blue',alpha = 0.2)
+# ax2.legend(loc='right',fontsize = 12)
+# plt.show()
+
+# fig3, ax3 = plt.subplots(1,1,figsize = (10,4),dpi = 150)
+# ax3.plot(epochs, L2RE_list, label='L2RE', zorder=2)
+# ax3.set_xlabel('Epoch',fontsize = 16)
+# ax3.set_ylabel('Loss',fontsize = 16)
+# # ax3.set_yscale('log')
+# ax3.set_title('Loss during training',fontsize = 20)
+# ax3.tick_params(labelsize=12, which='both',top=True, right = True, direction='in')
+# ax3.grid(color='xkcd:dark blue',alpha = 0.2)
+# ax3.legend(loc='upper right',fontsize = 12)
+# plt.show()
 
 fig1, ax1 = plt.subplots(1,1,figsize = (10,4),dpi = 150)
 ax1.plot(epochs, total_loss_list, label='Scaled total loss', zorder=2)
@@ -616,16 +655,16 @@ ax1.set_ylabel('Loss',fontsize = 16)
 ax1.set_title('Loss during training',fontsize = 20)
 ax1.tick_params(labelsize=12, which='both',top=True, right = True, direction='in')
 ax1.grid(color='xkcd:dark blue',alpha = 0.2)
-ax1.legend(loc='upper right',fontsize = 12)
-plt.show()
+ax1.legend(fontsize = 12)
+# fig1.savefig('Scaled_Total_Loss.png', dpi=300)
 
 total_loss = np.array(L_data_list) + np.array(L2_list) + np.array(L_inf_list) + np.array(LBC_list)
 
 fig2, ax2 = plt.subplots(1,1,figsize = (10,4),dpi = 150)
-ax2.plot(epochs, L_data_list, label='L_data', zorder=1)
-ax2.plot(epochs, L2_list, label='L2', zorder=1)
-ax2.plot(epochs, L_inf_list, label='L_inf', zorder=1)
-ax2.plot(epochs, LBC_list, label='LBC', zorder=1)
+ax2.plot(epochs, L_data_list, label='$L_{data}$', zorder=1)
+ax2.plot(epochs, L2_list, label='$L_{2}$', zorder=1)
+ax2.plot(epochs, L_inf_list, label='soft-$L_{inf}$', zorder=1)
+ax2.plot(epochs, LBC_list, label='$L_{BC}$', zorder=1)
 # ax2.plot(epochs, total_loss, label='Total loss', zorder=2)
 ax2.set_xlabel('Epoch',fontsize = 16)
 ax2.set_ylabel('Loss',fontsize = 16)
@@ -633,21 +672,21 @@ ax2.set_yscale('log')
 ax2.set_title('Loss during training',fontsize = 20)
 ax2.tick_params(labelsize=12, which='both',top=True, right = True, direction='in')
 ax2.grid(color='xkcd:dark blue',alpha = 0.2)
-ax2.legend(loc='right',fontsize = 12)
-plt.show()
+ax2.legend(fontsize = 12)
+# fig2.savefig('Training_Loss.png', dpi=300)
 
 fig3, ax3 = plt.subplots(1,1,figsize = (10,4),dpi = 150)
 ax3.plot(epochs, L2RE_list, label='L2RE', zorder=2)
 ax3.set_xlabel('Epoch',fontsize = 16)
 ax3.set_ylabel('Loss',fontsize = 16)
 # ax3.set_yscale('log')
-ax3.set_title('Loss during training',fontsize = 20)
+ax3.set_title('Validation loss',fontsize = 20)
 ax3.tick_params(labelsize=12, which='both',top=True, right = True, direction='in')
 ax3.grid(color='xkcd:dark blue',alpha = 0.2)
-ax3.legend(loc='upper right',fontsize = 12)
-plt.show()
+ax3.legend(fontsize = 12)
+# fig3.savefig('Validation_Loss.png', dpi=300)
 
-# Save checkpoint
+#%% Save checkpoint
 checkpoint = {
     "branch_net_state_dict": branch_net.state_dict(),
     "trunk_net_state_dict": trunk_net.state_dict(),
