@@ -23,6 +23,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
 #%% Generate datasets
+train_batch_size = 65536
+validate_batch_size = 131072
+int_batch_size = 8192
+bound_batch_size = 1024
+test_batch_size = 131072
+
 np.random.seed(42)
 torch.manual_seed(42)
 
@@ -44,27 +50,27 @@ def GenBranchSamples(m1):
 
     return torch.hstack([m1, m2, x1, y1, z1, x2, y2, z2, P1x, P1y, P1z, P2x, P2y, P2z])
 
-npz_01 = np.load('TP01.npz')
+npz_01 = np.load('data/TP01.npz')
 coords_01 = npz_01['coords']
 u_01 = npz_01['u']
 params_01 = GenBranchSamples(torch.tensor([[0.1]] * len(u_01), dtype=torch.float).reshape(-1, 1))
 
-npz_02 = np.load('TP02.npz')
+npz_02 = np.load('data/TP02.npz')
 coords_02 = npz_02['coords']
 u_02 = npz_02['u']
 params_02 = GenBranchSamples(torch.tensor([[0.2]] * len(u_02), dtype=torch.float).reshape(-1, 1))
 
-npz_03 = np.load('TP03.npz')
+npz_03 = np.load('data/TP03.npz')
 coords_03 = npz_03['coords']
 u_03 = npz_03['u']
 params_03 = GenBranchSamples(torch.tensor([[0.3]] * len(u_03), dtype=torch.float).reshape(-1, 1))
 
-npz_04 = np.load('TP04.npz')
+npz_04 = np.load('data/TP04.npz')
 coords_04 = npz_04['coords']
 u_04 = npz_04['u']
 params_04 = GenBranchSamples(torch.tensor([[0.4]] * len(u_04), dtype=torch.float).reshape(-1, 1))
 
-npz_05 = np.load('TP05.npz')
+npz_05 = np.load('data/TP05.npz')
 coords_05 = npz_05['coords']
 u_05 = npz_05['u']
 params_05 = GenBranchSamples(torch.tensor([[0.5]] * len(u_05), dtype=torch.float).reshape(-1, 1))
@@ -85,14 +91,16 @@ dataset_train, dataset_validate = random_split(
 
 dloader_data_train = DataLoader(
     dataset = dataset_train,
-    batch_size = 256,
-    shuffle = True
+    batch_size = train_batch_size,
+    shuffle = True,
+    pin_memory = (device.type == "cuda")
 )
 
 dloader_data_validate = DataLoader(
     dataset = dataset_validate,
-    batch_size = 256,
-    shuffle = True
+    batch_size = validate_batch_size,
+    shuffle = True,
+    pin_memory = (device.type == "cuda")
 )
 
 def GenXint(n_points=1e6):
@@ -132,18 +140,96 @@ dataset_int = TensorDataset(branch_int, trunk_int)
 
 dloader_int = DataLoader(
     dataset = dataset_int,
-    batch_size = 256,
-    shuffle = True
+    batch_size = int_batch_size,
+    shuffle = True,
+    pin_memory = (device.type == "cuda")
 )
 
 dataset_bound = TensorDataset(branch_bound, trunk_bound)
 
 dloader_bound = DataLoader(
     dataset = dataset_bound,
-    batch_size = 256,
-    shuffle = True
+    batch_size = bound_batch_size,
+    shuffle = True,
+    pin_memory = (device.type == "cuda")
 )
 
+npz_15_3D = np.load('data/TP15_3D.npz')
+coords_15_3D = npz_15_3D['coords']
+u_15_3D = npz_15_3D['u']
+params_15_3D = GenBranchSamples(torch.tensor([[0.15]] * len(u_15_3D), dtype=torch.float).reshape(-1, 1))
+
+npz_15_2D = np.load('data/TP15_2D.npz')
+coords_15_2D = npz_15_2D['coords']
+u_15_2D = npz_15_2D['u']
+params_15_2D = GenBranchSamples(torch.tensor([[0.15]] * len(u_15_2D), dtype=torch.float).reshape(-1, 1))
+
+npz_15_1D = np.load('data/TP15_1D.npz')
+coords_15_1D = npz_15_1D['coords']
+u_15_1D = npz_15_1D['u']
+params_15_1D = GenBranchSamples(torch.tensor([[0.15]] * len(u_15_1D), dtype=torch.float).reshape(-1, 1))
+
+npz_25_3D = np.load('data/TP25_3D.npz')
+coords_25_3D = npz_25_3D['coords']
+u_25_3D = npz_25_3D['u']
+params_25_3D = GenBranchSamples(torch.tensor([[0.25]] * len(u_25_3D), dtype=torch.float).reshape(-1, 1))
+
+npz_25_2D = np.load('data/TP25_2D.npz')
+coords_25_2D = npz_25_2D['coords']
+u_25_2D = npz_25_2D['u']
+params_25_2D = GenBranchSamples(torch.tensor([[0.25]] * len(u_25_2D), dtype=torch.float).reshape(-1, 1))
+
+npz_25_1D = np.load('data/TP25_1D.npz')
+coords_25_1D = npz_25_1D['coords']
+u_25_1D = npz_25_1D['u']
+params_25_1D = GenBranchSamples(torch.tensor([[0.25]] * len(u_25_1D), dtype=torch.float).reshape(-1, 1))
+
+npz_35_3D = np.load('data/TP35_3D.npz')
+coords_35_3D = npz_35_3D['coords']
+u_35_3D = npz_35_3D['u']
+params_35_3D = GenBranchSamples(torch.tensor([[0.35]] * len(u_35_3D), dtype=torch.float).reshape(-1, 1))
+
+npz_35_2D = np.load('data/TP35_2D.npz')
+coords_35_2D = npz_35_2D['coords']
+u_35_2D = npz_35_2D['u']
+params_35_2D = GenBranchSamples(torch.tensor([[0.35]] * len(u_35_2D), dtype=torch.float).reshape(-1, 1))
+
+npz_35_1D = np.load('data/TP35_1D.npz')
+coords_35_1D = npz_35_1D['coords']
+u_35_1D = npz_35_1D['u']
+params_35_1D = GenBranchSamples(torch.tensor([[0.35]] * len(u_35_1D), dtype=torch.float).reshape(-1, 1))
+
+npz_45_3D = np.load('data/TP45_3D.npz')
+coords_45_3D = npz_45_3D['coords']
+u_45_3D = npz_45_3D['u']
+params_45_3D = GenBranchSamples(torch.tensor([[0.45]] * len(u_45_3D), dtype=torch.float).reshape(-1, 1))
+
+npz_45_2D = np.load('data/TP45_2D.npz')
+coords_45_2D = npz_45_2D['coords']
+u_45_2D = npz_45_2D['u']
+params_45_2D = GenBranchSamples(torch.tensor([[0.45]] * len(u_45_2D), dtype=torch.float).reshape(-1, 1))
+
+npz_45_1D = np.load('data/TP45_1D.npz')
+coords_45_1D = npz_45_1D['coords']
+u_45_1D = npz_45_1D['u']
+params_45_1D = GenBranchSamples(torch.tensor([[0.45]] * len(u_45_1D), dtype=torch.float).reshape(-1, 1))
+
+branch_test = torch.concat([params_15_1D, params_15_2D, params_15_3D, params_25_1D, params_25_2D, params_25_3D, params_35_1D, params_35_2D, params_35_3D, params_45_1D, params_45_2D, params_45_3D])
+trunk_test = np.concat([coords_15_1D, coords_15_2D, coords_15_3D, coords_25_1D, coords_25_2D, coords_25_3D, coords_35_1D, coords_35_2D, coords_35_3D, coords_45_1D, coords_45_2D, coords_45_3D])
+u_test = np.concat([u_15_1D, u_15_2D, u_15_3D, u_25_1D, u_25_2D, u_25_3D, u_35_1D, u_35_2D, u_35_3D, u_45_1D, u_45_2D, u_45_3D])
+
+trunk_test = torch.tensor(trunk_test, dtype=torch.float)
+u_test = torch.tensor(u_test, dtype=torch.float).reshape(-1, 1)
+
+dataset_test = TensorDataset(branch_test, trunk_test, u_test)
+
+dloader_test = DataLoader(
+    dataset = dataset_test,
+    batch_size = 131072,
+    shuffle = False,
+    drop_last = False,
+    pin_memory = (device.type == "cuda")
+)
 
 #%% Physics
 def KBar(trunk, branch):
@@ -370,6 +456,8 @@ LBC_list = []
 total_loss_list = []
 L2RE_list = []
 
+u_pred_test_list = []
+
 start_epoch = 1
 
 #%% Model functions
@@ -424,7 +512,7 @@ def train_epoch(epoch, beta=10.0):
         branch_bound_batch, trunk_bound_batch = bound_batch
 
         branch_data_batch = branch_data_batch.to(device, non_blocking=True)
-        trunk_data_batch = trunk_data_batch.to(device, non_blocking=True).detach().requires_grad_(True)
+        trunk_data_batch = trunk_data_batch.to(device, non_blocking=True)
         u_data_batch = u_data_batch.to(device, non_blocking=True).reshape(-1, 1)
 
         branch_int_batch = branch_int_batch.to(device, non_blocking=True)
@@ -485,27 +573,28 @@ def train_epoch(epoch, beta=10.0):
     trunk_net.eval()
     branch_net.eval()
 
-    sum_u_res, sum_u_batch = 0, 0
+    sum_u_res = torch.zeros((), dtype=torch.float, device=device)
+    sum_u_batch = torch.zeros((), dtype=torch.float, device=device)
 
     with torch.no_grad():
         for branch_valid_batch, trunk_valid_batch, u_valid_batch in tqdm(dloader_data_validate, desc=f"Epoch {epoch} (validating data)", leave=False):
             branch_valid_batch = branch_valid_batch.to(device, non_blocking=True)
-            trunk_valid_batch = trunk_valid_batch.to(device, non_blocking=True).detach().requires_grad_(True)
+            trunk_valid_batch = trunk_valid_batch.to(device, non_blocking=True)
             u_valid_batch = u_valid_batch.to(device, non_blocking=True)
     
             u_pred_valid = ModelForward(trunk_net, branch_net, trunk_valid_batch, branch_valid_batch)
-            u_pred_valid = u_pred_valid.detach().cpu().numpy().flatten()
-            u_valid_batch = u_valid_batch.detach().cpu().numpy().flatten()
 
-            sum_u_res = sum_u_res + ((u_pred_valid - u_valid_batch)**2).sum()
-            sum_u_batch = sum_u_batch + (u_valid_batch**2).sum()
+            sum_u_res = sum_u_res + ((u_pred_valid - u_valid_batch).pow(2)).sum()
+            sum_u_batch = sum_u_batch + (u_valid_batch.pow(2)).sum()
 
-        L2RE = np.sqrt(sum_u_res / sum_u_batch)
+        L2RE = torch.sqrt(sum_u_res / sum_u_batch.clamp_min(1e-24)).item()
 
     return epoch_L_data, epoch_L2, epoch_L_inf, epoch_LBC, epoch_total_loss, L2RE
 
 #%% Training code
 n_epoch = 5000
+patience = 200
+best_epoch = start_epoch - 1
 
 for epoch in range(start_epoch, start_epoch+n_epoch):
     L_data, L2, L_inf, LBC, total_loss, L2RE = train_epoch(epoch, beta=10)
@@ -516,6 +605,12 @@ for epoch in range(start_epoch, start_epoch+n_epoch):
     LBC_list.append(LBC)
     total_loss_list.append(total_loss)
     L2RE_list.append(L2RE)
+
+    if L2RE < L2RE_list[best_epoch]:
+        best_epoch = epoch
+
+    elif best_epoch <= epoch - patience and best_epoch > 300:
+        break
 
 print('Training finished')
 
@@ -561,13 +656,18 @@ ax3.grid(color='xkcd:dark blue',alpha = 0.2)
 ax3.legend(loc='upper right',fontsize = 12)
 plt.show()
 
+#%% Test dataset code
+with torch.no_grad():
+        for branch_test_batch, trunk_test_batch, u_test_batch in tqdm(dloader_test, desc=f"Testing", leave=False):
+            branch_test_batch = branch_test_batch.to(device, non_blocking=True)
+            trunk_test_batch = trunk_test_batch.to(device, non_blocking=True)
+            u_test_batch = u_test_batch.to(device, non_blocking=True)
+    
+            u_pred_test = ModelForward(trunk_net, branch_net, trunk_test_batch, branch_test_batch)
+            u_pred_test_list.append(u_pred_test.detach().cpu())
+
 #%% Save checkpoint
 checkpoint = {
-    "dloader_data_train":dloader_data_train,
-    "dloader_data_validate":dloader_data_validate,
-    "dloader_int":dloader_int,
-    "dloader_bound":dloader_bound,
-
     "branch_net_state_dict": branch_net.state_dict(),
     "trunk_net_state_dict": trunk_net.state_dict(),
     "output_bias": output_bias.detach(),
@@ -584,6 +684,8 @@ checkpoint = {
     "ema_L2": ema_L2,
     "ema_L_inf": ema_L_inf,
     "ema_LBC": ema_LBC,
+
+    "u_pred_test_list":u_pred_test_list
 }
 
 torch.save(checkpoint, "Full_PIDONet_Checkpoint.pt")
@@ -628,11 +730,6 @@ kappa = 0.635
 ug_min = 0.0006
 ug_max = 0.0415
 
-dloader_data_train = checkpoint["dloader_data_train"]
-dloader_data_validate = checkpoint["dloader_data_validate"]
-dloader_int = checkpoint["dloader_int"]
-dloader_bound = checkpoint["dloader_bound"]
-
 ema_L_data = checkpoint["ema_L_data"]
 ema_L2 = checkpoint["ema_L2"]
 ema_L_inf = checkpoint["ema_L_inf"]
@@ -649,6 +746,8 @@ L_inf_list = checkpoint["L_inf_list"]
 LBC_list = checkpoint["LBC_list"]
 total_loss_list = checkpoint["total_loss_list"]
 L2RE_list = checkpoint["L2RE_list"]
+
+u_pred_test_list = checkpoint["u_pred_test_list"]
 
 start_epoch = len(total_loss_list) + 1
 

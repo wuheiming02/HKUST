@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data import random_split
 from tqdm.auto import tqdm
 
-#%% Generate datasets (Do not run)
+#%% Generate datasets
 np.random.seed(42)
 torch.manual_seed(42)
 
@@ -32,27 +32,27 @@ def GenBranchSamples(m1):
 
     return torch.hstack([m1, m2, x1, y1, z1, x2, y2, z2, P1x, P1y, P1z, P2x, P2y, P2z])
 
-npz_01 = np.load('TP01.npz')
+npz_01 = np.load('data/TP01.npz')
 coords_01 = npz_01['coords']
 u_01 = npz_01['u']
 params_01 = GenBranchSamples(torch.tensor([[0.1]] * len(u_01), dtype=torch.float).reshape(-1, 1))
 
-npz_02 = np.load('TP02.npz')
+npz_02 = np.load('data/TP02.npz')
 coords_02 = npz_02['coords']
 u_02 = npz_02['u']
 params_02 = GenBranchSamples(torch.tensor([[0.2]] * len(u_02), dtype=torch.float).reshape(-1, 1))
 
-npz_03 = np.load('TP03.npz')
+npz_03 = np.load('data/TP03.npz')
 coords_03 = npz_03['coords']
 u_03 = npz_03['u']
 params_03 = GenBranchSamples(torch.tensor([[0.3]] * len(u_03), dtype=torch.float).reshape(-1, 1))
 
-npz_04 = np.load('TP04.npz')
+npz_04 = np.load('data/TP04.npz')
 coords_04 = npz_04['coords']
 u_04 = npz_04['u']
 params_04 = GenBranchSamples(torch.tensor([[0.4]] * len(u_04), dtype=torch.float).reshape(-1, 1))
 
-npz_05 = np.load('TP05.npz')
+npz_05 = np.load('data/TP05.npz')
 coords_05 = npz_05['coords']
 u_05 = npz_05['u']
 params_05 = GenBranchSamples(torch.tensor([[0.5]] * len(u_05), dtype=torch.float).reshape(-1, 1))
@@ -146,10 +146,10 @@ dloader_bound = DataLoader(
     drop_last = True
 )
 
-trunk_train = trunk_train.clone().detach().requires_grad_(True)
+trunk_train = trunk_train.clone().detach()
 branch_train = branch_train.clone().detach()
 u_train = u_train.clone().detach()
-trunk_validate = trunk_validate.clone().detach().requires_grad_(True)
+trunk_validate = trunk_validate.clone().detach()
 branch_validate = branch_validate.clone().detach()
 u_validate = u_validate.clone().detach()
 trunk_int = trunk_int.clone().detach().requires_grad_(True)
@@ -583,7 +583,9 @@ def train_epoch(epoch):
 
     return L_data, L2, L_inf, LBC, total_loss, L2RE
 #%% Training code
-n_epoch = 10
+n_epoch = 70
+patience = 200
+best_epoch = start_epoch - 1
 
 for epoch in tqdm(range(start_epoch, start_epoch+n_epoch)):
     L_data, L2, L_inf, LBC, total_loss, L2RE = train_epoch(epoch)
@@ -595,9 +597,15 @@ for epoch in tqdm(range(start_epoch, start_epoch+n_epoch)):
     total_loss_list.append(total_loss.detach().item())
     L2RE_list.append(L2RE)
 
+    if L2RE < L2RE_list[best_epoch]:
+        best_epoch = epoch
+
+    elif best_epoch <= epoch - patience and best_epoch > 800:
+        break
+
 print('Training finished')
 
-#%% Plot losses
+# Plot losses
 epochs = np.linspace(1, len(L_data_list), len(L_data_list))
 
 fig1, ax1 = plt.subplots(1,1,figsize = (10,4),dpi = 150)
@@ -639,19 +647,8 @@ ax3.grid(color='xkcd:dark blue',alpha = 0.2)
 ax3.legend(loc='upper right',fontsize = 12)
 plt.show()
 
-#%% Save checkpoint
+# Save checkpoint
 checkpoint = {
-    "trunk_train":trunk_train.detach(),
-    "branch_train":branch_train.detach(),
-    "u_train":u_train.detach(),
-    "trunk_validate":trunk_validate.detach(),
-    "branch_validate":branch_validate.detach(),
-    "u_validate":u_validate.detach(),
-    "trunk_int":trunk_int.detach(),
-    "branch_int":branch_int.detach(),
-    "trunk_bound":trunk_bound.detach(),
-    "branch_bound":branch_bound.detach(),
-
     "branch_net_state_dict": branch_net.state_dict(),
     "trunk_net_state_dict": trunk_net.state_dict(),
     "output_bias": output_bias.detach(),
@@ -711,17 +708,6 @@ optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 kappa = 0.635
 ug_min = 0.0006
 ug_max = 0.0415
-
-trunk_train = checkpoint["trunk_train"].requires_grad_(True)
-branch_train = checkpoint["branch_train"]
-u_train = checkpoint["u_train"]
-trunk_validate = checkpoint["trunk_validate"].requires_grad_(True)
-branch_validate = checkpoint["branch_validate"]
-u_validate = checkpoint["u_validate"]
-trunk_int = checkpoint["trunk_int"].requires_grad_(True)
-branch_int = checkpoint["branch_int"]
-trunk_bound = checkpoint["trunk_bound"].requires_grad_(True)
-branch_bound = checkpoint["branch_bound"]
 
 ema_L_data = checkpoint["ema_L_data"]
 ema_L2 = checkpoint["ema_L2"]
