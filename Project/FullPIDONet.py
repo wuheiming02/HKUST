@@ -644,7 +644,7 @@ ax2.set_yscale('log')
 ax2.set_title('Loss during training',fontsize = 20)
 ax2.tick_params(labelsize=12, which='both',top=True, right = True, direction='in')
 ax2.grid(color='xkcd:dark blue',alpha = 0.2)
-ax2.legend(loc='right',fontsize = 12)
+ax2.legend(fontsize = 12)
 plt.show()
 
 fig3, ax3 = plt.subplots(1,1,figsize = (10,4),dpi = 150)
