@@ -1,14 +1,8 @@
-# Import modules
+#%% Import modules
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MultipleLocator
 import matplotlib.colors as colors
 import torch
-import torch.nn as nn
-from torch.utils.data import TensorDataset
-from torch.utils.data import DataLoader
-from torch.utils.data import random_split
-from tqdm.auto import tqdm
 
 # Generate datasets
 np.random.seed(42)
@@ -104,8 +98,8 @@ n_batch = n_1D + n_2D + n_3D
 m1 = [0.15, 0.25, 0.35, 0.45]
 
 u_test = u_test.detach().flatten()
-#%%
-checkpoint = torch.load("Full_PIDONet_Checkpoint2.pt", weights_only=False, map_location=torch.device('cpu'))
+#
+checkpoint = torch.load("Full_PIDONet_Checkpoint4.pt", weights_only=False, map_location=torch.device('cpu'))
 u_test_pred = checkpoint['u_pred_test_list']
 u_test_pred = torch.concat(u_test_pred).detach().flatten()
 
@@ -119,7 +113,7 @@ L2RE_list = checkpoint["L2RE_list"]
 # Plot losses
 epochs = np.linspace(1, len(L_data_list), len(L_data_list))
 
-fig1, ax1 = plt.subplots(1,1,figsize = (10,4),dpi = 150)
+fig1, ax1 = plt.subplots(1, 1, figsize=(10,4), dpi=150)
 ax1.plot(epochs, total_loss_list, label='Scaled total loss', zorder=2)
 ax1.set_xlabel('Epoch',fontsize = 16)
 ax1.set_ylabel('Loss',fontsize = 16)
@@ -132,7 +126,7 @@ plt.show()
 
 total_loss = np.array(L_data_list) + np.array(L2_list) + np.array(L_inf_list) + np.array(LBC_list)
 
-fig2, ax2 = plt.subplots(1,1,figsize = (10,4),dpi = 150)
+fig2, ax2 = plt.subplots(1, 1, figsize=(10,4), dpi=150)
 ax2.plot(epochs, L_data_list, label='$L_{data}$', zorder=1)
 ax2.plot(epochs, L2_list, label='$L_{2}$', zorder=1)
 ax2.plot(epochs, L_inf_list, label='soft-$L_{inf}$', zorder=1)
@@ -146,12 +140,11 @@ ax2.grid(color='xkcd:dark blue',alpha = 0.2)
 ax2.legend(fontsize = 12)
 plt.show()
 
-fig3, ax3 = plt.subplots(1,1,figsize = (10,4),dpi = 150)
+fig3, ax3 = plt.subplots(1, 1, figsize=(10,4), dpi=150)
 ax3.plot(epochs, L2RE_list, label='L2RE', zorder=2)
 ax3.set_xlabel('Epoch',fontsize = 16)
 ax3.set_ylabel('Loss',fontsize = 16)
-# ax3.set_yscale('log')
-ax3.set_title('Loss during training',fontsize = 20)
+ax3.set_title('Validation loss',fontsize = 20)
 ax3.tick_params(labelsize=12, which='both',top=True, right = True, direction='in')
 ax3.grid(color='xkcd:dark blue',alpha = 0.2)
 ax3.legend(loc='upper right',fontsize = 12)
@@ -202,72 +195,72 @@ print(L2RE_3D_list)
 figures, axes = [], []
 
 for i in range(4):
-    fig1, ax1 = plt.subplots(1, 1, figsize=(6, 4), dpi=300)
-    figures.append(fig1)
-    axes.append(ax1)
-    ax1.grid(alpha=0.3)
-    ax1.plot(trunk_test[n_batch*i:n_batch*i+n_1D, 0], u_test[n_batch*i:n_batch*i+n_1D], '-', label='$u_{TP}$')
-    ax1.plot(trunk_test[n_batch*i:n_batch*i+n_1D, 0], u_test_pred[n_batch*i:n_batch*i+n_1D], '--', label='$u_{\\theta}$')
-    ax1.set_xlabel('X', fontsize=12)
-    ax1.set_ylabel('u', fontsize=12, rotation=0)
-    ax1.set_xlim(-30, 30)
-    ax1.set_title(f'$m_1={m1[i]}$, $(\\text{{L2RE}}={L2RE_1D_list[i]:.4f})$', fontsize=16)
-    ax1.legend(loc='upper right', fontsize=10)
-    ax1.tick_params(axis='x', labelsize=10)
-    ax1.tick_params(axis='y', labelsize=10)
-    fig1.tight_layout()
-    plt.show()
-
-    fig2, ax2 = plt.subplots(1,1,figsize = (9,6),dpi = 150)
-    figures.append(fig2)
-    axes.append(ax2)
-    heatmap2 = ax2.scatter(trunk_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D, 0],  trunk_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D, 1], c=u_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D], cmap='plasma')
-    ax2.grid(alpha=0.2)
-    ax2.set_aspect('equal', adjustable='box')
-    cbar2 = fig2.colorbar(heatmap2)
-    cbar2.set_label('$u_{TP}$', fontsize =16)
-    cbar2.ax.tick_params(labelsize=12)
-    ax2.set_xlabel('X', fontsize = 16)
-    ax2.set_ylabel('Y', fontsize = 16, rotation=0)
-    ax2.set_xlim(-31, 31)
-    ax2.set_ylim(-31, 31)
-    ax2.set_title(f'$u_{{TP}}$ in XY-plane $(m_1={m1[i]})$',fontsize = 20)
-    ax2.tick_params(labelsize=12, which='both',top=True, right = True, direction='out')
-    fig2.tight_layout()
-    plt.show()
-
-    fig3, ax3 = plt.subplots(1,1,figsize = (9,6),dpi = 150)
-    figures.append(fig3)
-    axes.append(ax3)
-    heatmap3 = ax3.scatter(trunk_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D, 0],  trunk_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D, 1], c=u_test_pred[n_batch*i+n_1D:n_batch*i+n_1D+n_2D], cmap='plasma')
-    ax3.grid(alpha=0.2)
-    ax3.set_aspect('equal', adjustable='box')
-    cbar3 = fig3.colorbar(heatmap3)
-    cbar3.set_label('$u_{TP}$', fontsize =16)
-    cbar3.ax.tick_params(labelsize=12)
-    ax3.set_xlabel('X', fontsize = 16)
-    ax3.set_ylabel('Y', fontsize = 16, rotation=0)
-    ax3.set_xlim(-31, 31)
-    ax3.set_ylim(-31, 31)
-    ax3.set_title(f'$u_{{\\theta}}$ in XY-plane $(m_1={m1[i]})$',fontsize = 20)
-    ax3.tick_params(labelsize=12, which='both',top=True, right = True, direction='out')
-    fig3.tight_layout()
-    plt.show()
-
-    norm4 = colors.TwoSlopeNorm(vmin=-(abs(u_test_pred[n_batch*i+n_1D:n_batch*i+n_1D+n_2D]-u_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D]).max()), vcenter=0.0, vmax=abs(u_test_pred[n_batch*i+n_1D:n_batch*i+n_1D+n_2D]-u_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D]).max())
-    fig4, ax4 = plt.subplots(1,1,figsize = (8,6),dpi = 160)
-    heatmap4 = ax4.scatter(trunk_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D, 0],  trunk_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D, 1], c=u_test_pred[n_batch*i+n_1D:n_batch*i+n_1D+n_2D]-u_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D], norm=norm4, cmap='RdBu')
-    ax4.grid(alpha=0.2)
-    ax4.set_aspect('equal', adjustable='box')
-    cbar4 = fig4.colorbar(heatmap4)
-    cbar4.ax.tick_params(labelsize=12)
-    ax4.set_xlabel('X', fontsize = 16)
-    ax4.set_ylabel('Y', fontsize = 16, rotation=0)
-    ax4.set_xlim(-31, 31)
-    ax4.set_ylim(-31, 31)
-    ax4.set_title(f'$u_{{\\theta}} - u_{{TP}}$ ($m_1={m1[i]}$, $\\text{{L2RE}}={L2RE_2D_list[i]:.4f}$)',fontsize = 20)
-    ax4.tick_params(labelsize=12, which='both',top=True, right = True, direction='out')
+    fig4, ax4 = plt.subplots(1, 1, figsize=(6, 4), dpi=300)
+    figures.append(fig4)
+    axes.append(ax4)
+    ax4.grid(alpha=0.3)
+    ax4.plot(trunk_test[n_batch*i:n_batch*i+n_1D, 0], u_test[n_batch*i:n_batch*i+n_1D], '-', label='$u_{TP}$')
+    ax4.plot(trunk_test[n_batch*i:n_batch*i+n_1D, 0], u_test_pred[n_batch*i:n_batch*i+n_1D], '--', label='$u_{\\theta}$')
+    ax4.set_xlabel('X', fontsize=12)
+    ax4.set_ylabel('u', fontsize=12, rotation=0)
+    ax4.set_xlim(-30, 30)
+    ax4.set_title(f'$m_+={m1[i]}$, $(\\text{{L2RE}}={L2RE_1D_list[i]:.4f})$', fontsize=16)
+    ax4.legend(loc='upper right', fontsize=10)
+    ax4.tick_params(axis='x', labelsize=10)
+    ax4.tick_params(axis='y', labelsize=10)
     fig4.tight_layout()
+    plt.show()
+
+    fig5, ax5 = plt.subplots(1, 1, figsize=(9,6), dpi=150)
+    figures.append(fig5)
+    axes.append(ax5)
+    heatmap5 = ax5.scatter(trunk_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D, 0],  trunk_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D, 1], c=u_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D], cmap='plasma')
+    ax5.grid(alpha=0.2)
+    ax5.set_aspect('equal', adjustable='box')
+    cbar5 = fig5.colorbar(heatmap5)
+    cbar5.set_label('$u_{TP}$', fontsize =16)
+    cbar5.ax.tick_params(labelsize=12)
+    ax5.set_xlabel('X', fontsize = 16)
+    ax5.set_ylabel('Y', fontsize = 16, rotation=0)
+    ax5.set_xlim(-31, 31)
+    ax5.set_ylim(-31, 31)
+    ax5.set_title(f'$u_{{TP}}$ in XY-plane $(m_+={m1[i]})$',fontsize = 20)
+    ax5.tick_params(labelsize=12, which='both',top=True, right = True, direction='out')
+    fig5.tight_layout()
+    plt.show()
+
+    fig6, ax6 = plt.subplots(1, 1, figsize=(9,6), dpi=150)
+    figures.append(fig6)
+    axes.append(ax6)
+    heatmap6 = ax6.scatter(trunk_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D, 0],  trunk_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D, 1], c=u_test_pred[n_batch*i+n_1D:n_batch*i+n_1D+n_2D], cmap='plasma')
+    ax6.grid(alpha=0.2)
+    ax6.set_aspect('equal', adjustable='box')
+    cbar6 = fig6.colorbar(heatmap6)
+    cbar6.set_label('$u_{TP}$', fontsize =16)
+    cbar6.ax.tick_params(labelsize=12)
+    ax6.set_xlabel('X', fontsize = 16)
+    ax6.set_ylabel('Y', fontsize = 16, rotation=0)
+    ax6.set_xlim(-31, 31)
+    ax6.set_ylim(-31, 31)
+    ax6.set_title(f'$u_{{\\theta}}$ in XY-plane $(m_+={m1[i]})$',fontsize = 20)
+    ax6.tick_params(labelsize=12, which='both',top=True, right = True, direction='out')
+    fig6.tight_layout()
+    plt.show()
+
+    norm7 = colors.TwoSlopeNorm(vmin=-(abs(u_test_pred[n_batch*i+n_1D:n_batch*i+n_1D+n_2D]-u_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D]).max()), vcenter=0.0, vmax=abs(u_test_pred[n_batch*i+n_1D:n_batch*i+n_1D+n_2D]-u_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D]).max())
+    fig7, ax7 = plt.subplots(1, 1, figsize=(8,6), dpi=160)
+    heatmap7 = ax7.scatter(trunk_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D, 0],  trunk_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D, 1], c=u_test_pred[n_batch*i+n_1D:n_batch*i+n_1D+n_2D]-u_test[n_batch*i+n_1D:n_batch*i+n_1D+n_2D], norm=norm7, cmap='RdBu_r')
+    ax7.grid(alpha=0.2)
+    ax7.set_aspect('equal', adjustable='box')
+    cbar7 = fig7.colorbar(heatmap7)
+    cbar7.ax.tick_params(labelsize=12)
+    ax7.set_xlabel('X', fontsize = 16)
+    ax7.set_ylabel('Y', fontsize = 16, rotation=0)
+    ax7.set_xlim(-31, 31)
+    ax7.set_ylim(-31, 31)
+    ax7.set_title(f'$u_{{\\theta}} - u_{{TP}}$ ($m_+={m1[i]}$, $\\text{{L2RE}}={L2RE_2D_list[i]:.4f}$)',fontsize = 20)
+    ax7.tick_params(labelsize=12, which='both',top=True, right = True, direction='out')
+    fig7.tight_layout()
     plt.show()
 
 #%%
